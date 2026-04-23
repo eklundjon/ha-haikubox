@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Haikubox Setup",
+        "description": "Enter the serial number printed on the bottom of your Haikubox.",
+        "data": {
+          "serial": "Serial number"
+        },
+        "data_description": {
+          "serial": "The serial code for your Haikubox device (e.g. 100000003d7c9f2b)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Haikubox",
+        "description": "Update the serial number for your Haikubox.",
+        "data": {
+          "serial": "Serial number"
+        },
+        "data_description": {
+          "serial": "The serial code for your Haikubox device"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Haikubox API — check your serial number"
+    },
+    "abort": {
+      "already_configured": "This Haikubox is already configured",
+      "reconfigure_successful": "Re-configuration was successful"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "recent_detections": {
+        "name": "Recent species detected"
+      },
+      "last_detected": {
+        "name": "Last detected species"
+      },
+      "daily_count": {
+        "name": "Birds detected today"
+      },
+      "daily_species": {
+        "name": "Species heard today"
+      },
+      "notable_detection": {
+        "name": "Most unusual recent detection"
+      },
+      "new_species": {
+        "name": "New species detected"
+      },
+      "yearly_top": {
+        "name": "Top species this year"
+      },
+      "daily_top": {
+        "name": "Top species today"
+      },
+      "seven_day_rare": {
+        "name": "Rarest species (7 days)"
+      }
+    }
+  }
+}

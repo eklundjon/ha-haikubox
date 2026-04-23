@@ -1,0 +1,11 @@
+{
+  "domain": "haikubox",
+  "name": "Haikubox",
+  "version": "0.1.0",
+  "documentation": "https://github.com/eklundjon/ha-haikubox",
+  "dependencies": [],
+  "codeowners": ["@eklundjon"],
+  "requirements": ["aiofiles>=23.0"],
+  "iot_class": "cloud_polling",
+  "config_flow": true
+}
