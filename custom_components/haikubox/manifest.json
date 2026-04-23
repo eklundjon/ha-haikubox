@@ -3,10 +3,10 @@
   "name": "Haikubox",
   "version": "0.1.0",
   "documentation": "https://github.com/eklundjon/ha-haikubox",
-  "dependencies": [],
+  "issue_tracker": "https://github.com/eklundjon/ha-haikubox/issues",
+  "dependencies": ["http", "frontend"],
   "codeowners": ["@eklundjon"],
   "requirements": ["aiofiles>=23.0"],
   "iot_class": "cloud_polling",
-  "config_flow": true,
-  "homeassistant": "2024.4.0"
+  "config_flow": true
 }
