@@ -19,9 +19,8 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 _CARDS = [
-    ("/haikubox/haikubox-bird-card.js",        "www/haikubox-bird-card.js"),
-    ("/haikubox/haikubox-new-species-card.js", "www/haikubox-new-species-card.js"),
-    ("/haikubox/haikubox-bird-list-card.js",    "www/haikubox-details-card.js"),
+    ("/haikubox/haikubox-bird-card.js",      "www/haikubox-bird-card.js"),
+    ("/haikubox/haikubox-bird-list-card.js", "www/haikubox-details-card.js"),
 ]
 
 
@@ -55,5 +54,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id)
     return unloaded
-
-
