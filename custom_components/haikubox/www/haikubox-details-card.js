@@ -6,14 +6,118 @@ function _esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+// ── Editor ────────────────────────────────────────────────────────────────────
+
+class HaikuboxBirdListCardEditor extends HTMLElement {
+  // No shadow DOM — light DOM avoids isolation issues with ha-entity-picker
+
+  setConfig(config) {
+    this._config = config;
+    if (!this._built) {
+      this._built = true;
+      this._init();
+    } else {
+      if (this._picker)     this._picker.value     = config.entity ?? "";
+      if (this._titleField) this._titleField.value = config.title ?? "";
+      if (this._topField)   this._topField.value   = config.top ?? 10;
+    }
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._built) {
+      this._built = true;
+      this._init();
+    } else if (this._picker) {
+      this._picker.hass = hass;
+    }
+  }
+
+  _fire(update) {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: { ...this._config, ...update } },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  async _init() {
+    try {
+      if (window.loadCardHelpers) await window.loadCardHelpers();
+    } catch (_) { /* ignore */ }
+
+    const form = document.createElement("div");
+    form.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:0 16px 16px";
+
+    let entityField;
+    if (customElements.get("ha-entity-picker")) {
+      entityField = document.createElement("ha-entity-picker");
+      entityField.label = "Entity";
+      entityField.setAttribute("allow-custom-entity", "");
+      entityField.includeDomains = ["sensor"];
+      if (this._hass) entityField.hass = this._hass;
+      entityField.value = this._config?.entity ?? "";
+      entityField.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
+    } else if (customElements.get("ha-selector")) {
+      entityField = document.createElement("ha-selector");
+      entityField.label = "Entity";
+      entityField.selector = { entity: { domain: ["sensor"] } };
+      if (this._hass) entityField.hass = this._hass;
+      entityField.value = this._config?.entity ?? "";
+      entityField.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
+    } else {
+      entityField = document.createElement("ha-textfield");
+      entityField.label = "Entity ID";
+      entityField.value = this._config?.entity ?? "";
+      entityField.addEventListener("change", (e) => this._fire({ entity: e.target.value }));
+    }
+    entityField.style.cssText = "display:block;width:100%";
+    this._picker = entityField;
+
+    const titleField = document.createElement("ha-textfield");
+    titleField.label = "Title (optional)";
+    titleField.style.cssText = "display:block;width:100%";
+    titleField.value = this._config?.title ?? "";
+    titleField.addEventListener("change", (e) => this._fire({ title: e.target.value }));
+    this._titleField = titleField;
+
+    const topField = document.createElement("ha-textfield");
+    topField.label = "Max items";
+    topField.type = "number";
+    topField.setAttribute("min", "1");
+    topField.style.cssText = "display:block;width:100%";
+    topField.value = this._config?.top ?? 10;
+    topField.addEventListener("change", (e) => {
+      const v = parseInt(e.target.value, 10);
+      this._fire({ top: isNaN(v) || v < 1 ? 10 : v });
+    });
+    this._topField = topField;
+
+    form.append(entityField, titleField, topField);
+    this.appendChild(form);
+  }
+}
+
+customElements.define("haikubox-bird-list-card-editor", HaikuboxBirdListCardEditor);
+
+// ── Card ──────────────────────────────────────────────────────────────────────
+
 class HaikuboxBirdListCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
   }
 
+  static getConfigElement() {
+    return document.createElement("haikubox-bird-list-card-editor");
+  }
+
+  static getStubConfig() {
+    return { entity: "", title: "", top: 10 };
+  }
+
   setConfig(config) {
-    if (!config.entity) throw new Error("'entity' is required");
+    if (config.entity === undefined) throw new Error("'entity' is required");
     this._config = { top: 10, ...config };
   }
 
@@ -51,12 +155,21 @@ class HaikuboxBirdListCard extends HTMLElement {
     const attrs = stateObj?.attributes ?? {};
     const items = (attrs.items ?? []).slice(0, this._config.top);
     const title = this._config.title ?? attrs.friendly_name ?? "";
-    const maxHeight = this._config.max_height;
 
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; }
-        ha-card { padding: 0 0 4px; }
+        :host { display: block; height: 100%; }
+        ha-card {
+          overflow: hidden;
+          height: 100%;
+          padding: 0;
+        }
+        .layout {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          padding-bottom: 4px;
+        }
 
         .card-header {
           padding: 14px 16px 10px;
@@ -65,11 +178,13 @@ class HaikuboxBirdListCard extends HTMLElement {
           text-align: center;
           color: var(--primary-text-color);
           border-bottom: 1px solid var(--divider-color);
+          flex-shrink: 0;
         }
 
         .list {
+          flex: 1;
           overflow-y: auto;
-          ${maxHeight ? `max-height: ${maxHeight}px;` : ""}
+          min-height: 0;
         }
         .list::-webkit-scrollbar { width: 4px; }
         .list::-webkit-scrollbar-track { background: transparent; }
@@ -212,6 +327,7 @@ class HaikuboxBirdListCard extends HTMLElement {
         }
       </style>
       <ha-card>
+        <div class="layout">
         ${title ? `<div class="card-header">${_esc(title)}</div>` : ""}
         <div class="list">
           ${items.length === 0
@@ -247,6 +363,7 @@ class HaikuboxBirdListCard extends HTMLElement {
                 </div>
               `).join("")}
         </div>
+        </div>
       </ha-card>
     `;
 
@@ -264,6 +381,15 @@ class HaikuboxBirdListCard extends HTMLElement {
   getCardSize() {
     const attrs = this._hass?.states[this._config.entity]?.attributes ?? {};
     return Math.min(attrs.items?.length ?? 0, this._config.top) + 2;
+  }
+
+  getLayoutOptions() {
+    return {
+      grid_columns: 4,
+      grid_rows: 4,
+      grid_min_columns: 2,
+      grid_min_rows: 2,
+    };
   }
 }
 

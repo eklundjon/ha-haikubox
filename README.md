@@ -91,12 +91,22 @@ The integration registers three custom Lovelace cards automatically — no manua
 
 ### `haikubox-bird-card`
 
-Displays a single bird detection with a full-width photo, species name, scientific name, and a relative timestamp.
+Displays a single bird detection with a photo, species name, scientific name, and a relative timestamp.
 
 ```yaml
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_most_unusual_recent_detection
+layout_options:
+  grid_columns: 2
+  grid_rows: 3
 ```
+
+The card is fully responsive to both width and height:
+
+- **Portrait** — photo fills the card width up to a square (1:1), text is centred below. When space is tight, the scientific name is dropped and the photo shrinks to maintain at most a 3:2 aspect ratio.
+- **Wide** — when the card is wider than 3:2, the photo moves to the left and text appears on the right.
+
+Use `grid_columns` and `grid_rows` in `layout_options` to control size (defaults: 2 columns, no locked rows). The card adapts gracefully at any reasonable aspect ratio.
 
 Works with any sensor that exposes `image_url`, `scientific_name`, and `last_seen` attributes (e.g. `last_detected`, `notable_detection`).
 
@@ -109,9 +119,11 @@ A ranked species list with tap-to-expand detail rows. Works with all three bird 
 ```yaml
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_this_year
-title: Top Species This Year   # optional; defaults to entity friendly name
+title: Top Species This Year   # optional; omit to use entity friendly name, "" for no title
 top: 10                        # max items to render (default: 10)
-max_height: 400                # optional: scrollable at this height in pixels
+layout_options:
+  grid_columns: 4              # default
+  grid_rows: 4                 # controls card height; list scrolls if content exceeds it
 ```
 
 Tapping any row slides open an expanded view showing a larger photo, scientific name, and contextual metrics:
@@ -127,17 +139,25 @@ type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_this_year
 title: Top Species This Year
 top: 20
-max_height: 500
+layout_options:
+  grid_columns: 4
+  grid_rows: 6
 
 # Daily top
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_today
 title: Top Species Today
+layout_options:
+  grid_columns: 4
+  grid_rows: 4
 
 # 7-day rarity
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_rarest_species_7_days
 title: Unusual Birds This Week
+layout_options:
+  grid_columns: 4
+  grid_rows: 4
 ```
 
 ---
@@ -156,7 +176,6 @@ sections:
         entity: sensor.bird_shazam_top_species_this_year
         title: Top Species This Year
         top: 20
-        max_height: 500
   - type: grid
     cards:
       - type: custom:haikubox-bird-list-card
