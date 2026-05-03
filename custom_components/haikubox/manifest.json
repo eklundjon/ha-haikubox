@@ -1,12 +1,19 @@
 {
   "domain": "haikubox",
   "name": "Haikubox",
-  "codeowners": ["@eklundjon"],
+  "codeowners": [
+    "@eklundjon"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "frontend"],
+  "dependencies": [
+    "http",
+    "frontend"
+  ],
   "documentation": "https://github.com/eklundjon/ha-haikubox",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/eklundjon/ha-haikubox/issues",
-  "requirements": ["aiofiles>=23.0"],
-  "version": "0.1.0"
+  "requirements": [
+    "aiofiles>=23.0"
+  ],
+  "version": "0.3.1"
 }
