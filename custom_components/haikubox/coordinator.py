@@ -6,31 +6,45 @@ from typing import Any
 
 import aiohttp
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import API_BASE, DEFAULT_SCAN_INTERVAL, DETECTION_HOURS, DOMAIN, IMAGES_BASE
+from .const import (
+    API_BASE,
+    CONF_DEVICE_NAME,
+    CONF_SERIAL,
+    DEFAULT_SCAN_INTERVAL,
+    DETECTION_HOURS,
+    DOMAIN,
+    IMAGES_BASE,
+)
 from .image_cache import ImageCache
 
 _LOGGER = logging.getLogger(__name__)
 
 _STORE_VERSION = 1
 
+# Config entry whose runtime_data is the coordinator (lazily evaluated,
+# so the forward reference to the class below is fine).
+type HaikuboxConfigEntry = ConfigEntry[HaikuboxCoordinator]
+
 
 class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Polls the Haikubox API and normalises the response for sensors."""
 
-    def __init__(self, hass: HomeAssistant, serial: str, device_name: str) -> None:
+    def __init__(self, hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
+            config_entry=entry,
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
-        self.serial = serial
-        self.device_name = device_name
+        self.serial = entry.data[CONF_SERIAL]
+        self.device_name = entry.data.get(CONF_DEVICE_NAME, "Haikubox")
         self._session = async_get_clientsession(hass)
 
         # Yearly counts — refreshed once per calendar day
