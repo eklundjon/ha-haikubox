@@ -165,7 +165,13 @@ class HaikuboxBirdListCard extends HTMLElement {
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
     const items = (attrs.items ?? []).slice(0, this._config.top);
-    const title = this._config.title ?? attrs.friendly_name ?? "";
+    // Fall back to the entity's friendly name when no title is set.
+    // The stub config and editor write title:"" (not nullish), so a
+    // plain `??` chain never reached the fallback for UI-created cards.
+    const configured = this._config.title;
+    const title = (configured && configured.trim())
+      ? configured
+      : (attrs.friendly_name ?? "");
 
     this.shadowRoot.innerHTML = `
       <style>
