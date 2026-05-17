@@ -170,6 +170,15 @@ class HaikuboxBirdCard extends HTMLElement {
           height: 100%;
           object-fit: cover;
         }
+        .img-placeholder {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--secondary-background-color);
+          font-size: 3em;
+        }
         /* Body fills remaining space; justify-content centres text vertically */
         .body {
           flex: 1 1 auto;
@@ -266,7 +275,9 @@ class HaikuboxBirdCard extends HTMLElement {
             <div class="empty">No recent detections</div>
           ` : `
             <div class="img-wrap">
-              <img src="${_esc(attrs.image_url ?? "")}" alt="${_esc(species)}">
+              ${attrs.image_url
+                ? `<img src="${_esc(attrs.image_url)}" alt="${_esc(species)}">`
+                : `<div class="img-placeholder">🐦</div>`}
             </div>
             <div class="body">
               <div class="text-group">
