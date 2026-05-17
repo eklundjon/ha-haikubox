@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Any
 
 import aiohttp
-import aiofiles
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -14,6 +12,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import API_BASE, DEFAULT_SCAN_INTERVAL, DETECTION_HOURS, DOMAIN, IMAGES_BASE
+from .image_cache import ImageCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,10 +59,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._seven_day_data: dict[str, list] = {}       # date_str → [species records]
         self._stores_loaded: bool = False
 
-        # Local image cache directory (served via /local/haikubox/)
-        self._image_cache_dir: Path = Path(hass.config.path("www", "haikubox"))
-        # In-memory set of sp_codes with a cached image; avoids repeated stat calls
-        self._cached_images: set[str] = set()
+        # Species photo cache (downloads once, serves from /local/)
+        self._images = ImageCache(hass, self._session)
 
     # ------------------------------------------------------------------
     # DataUpdateCoordinator interface
@@ -99,7 +96,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Cache images and rewrite image_url to local path
         for d in detections:
             if d.get("sp_code"):
-                d["image_url"] = await self._cache_image(d["sp_code"])
+                d["image_url"] = await self._images.async_fetch(d["sp_code"])
 
         # Update sp_codes, scientific_name, and last_seen lookups from current detections
         sp_codes_dirty = False
@@ -196,17 +193,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
         self._yearly_total = len(self._yearly_ranks)
 
-        # Create image cache directory and index existing files — one executor
-        # call at startup, then all image lookups are in-memory.
-        await self.hass.async_add_executor_job(self._init_image_cache)
+        await self._images.async_init()
 
         self._stores_loaded = True
-
-    def _init_image_cache(self) -> None:
-        """Create the image cache directory and populate _cached_images."""
-        self._image_cache_dir.mkdir(parents=True, exist_ok=True)
-        for p in self._image_cache_dir.glob("*.jpeg"):
-            self._cached_images.add(p.stem)
 
     async def _update_seven_day(
         self, detections: list[dict[str, Any]], today: date
@@ -270,19 +259,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Dataset builders (store-only, no API calls)
     # ------------------------------------------------------------------
 
-    def _image_url_for(self, sp_code: str) -> str | None:
-        """Local cached image URL if available, else the remote S3 URL.
-
-        Mirrors _cache_image's fallback so the list cards show the photo
-        instead of a placeholder before it has been cached locally. None
-        only when there is no species code at all.
-        """
-        if not sp_code:
-            return None
-        if sp_code in self._cached_images:
-            return f"/local/haikubox/{sp_code}.jpeg"
-        return f"{IMAGES_BASE}/{sp_code}.jpeg"
-
     def _build_yearly_top(self) -> list[dict[str, Any]]:
         """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
         result = []
@@ -294,7 +270,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "sp_code": sp_code,
                 "scientific_name": self._sci_names.get(sp, ""),
                 "last_seen": self._last_seen.get(sp),
-                "image_url": self._image_url_for(sp_code),
+                "image_url": self._images.url_for(sp_code),
             })
         return result
 
@@ -309,7 +285,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "sp_code": sp_code,
                 "scientific_name": self._sci_names.get(sp, ""),
                 "last_seen": self._last_seen.get(sp),
-                "image_url": self._image_url_for(sp_code),
+                "image_url": self._images.url_for(sp_code),
             })
         return result
 
@@ -332,7 +308,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "sp_code": sp_code,
             "first_seen": first_seen,
             "last_seen": self._last_seen.get(species),
-            "image_url": self._image_url_for(sp_code),
+            "image_url": self._images.url_for(sp_code),
         }
 
     # ------------------------------------------------------------------
@@ -354,28 +330,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
-
-    async def _cache_image(self, sp_code: str) -> str:
-        """Return a local /local/ URL for the species image, downloading it if needed."""
-        if sp_code in self._cached_images:
-            return f"/local/haikubox/{sp_code}.jpeg"
-
-        local_path = self._image_cache_dir / f"{sp_code}.jpeg"
-        url = f"{IMAGES_BASE}/{sp_code}.jpeg"
-        try:
-            async with self._session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.read()
-                    async with aiofiles.open(local_path, "wb") as f:
-                        await f.write(data)
-                    self._cached_images.add(sp_code)
-                else:
-                    _LOGGER.debug("No image for %s (HTTP %s)", sp_code, resp.status)
-                    return f"{IMAGES_BASE}/{sp_code}.jpeg"
-        except aiohttp.ClientError as err:
-            _LOGGER.debug("Could not cache image for %s: %s", sp_code, err)
-            return f"{IMAGES_BASE}/{sp_code}.jpeg"
-        return f"/local/haikubox/{sp_code}.jpeg"
 
     async def _fetch_detections(self) -> Any:
         url = f"{API_BASE}/haikubox/{self.serial}/detections"
