@@ -298,10 +298,12 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 
   getGridOptions() {
+    // Sections grid is a 12-column scale (not the small scale the old
+    // getLayoutOptions numbers assumed). Half-width photo card.
     return {
-      columns: 2,
-      min_columns: 2,
-      max_columns: 6,
+      columns: 6,
+      rows: 4,
+      min_columns: 4,
     };
   }
 }
