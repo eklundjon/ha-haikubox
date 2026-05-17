@@ -146,7 +146,9 @@ class HaikuboxBirdListCard extends HTMLElement {
 
   _periodLabel(item) {
     if (item.rank != null) return "this year";
-    if (item.rarity_score != null) return "this week";
+    // 7-day-rare items: count is detections on a single day within the
+    // window (not a weekly total), so don't imply "this week".
+    if (item.rarity_score != null) return "in one day";
     return "today";
   }
 
