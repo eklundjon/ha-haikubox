@@ -166,6 +166,7 @@ class HaikuboxBirdListCard extends HTMLElement {
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
     const items = (attrs.items ?? []).slice(0, this._config.top);
+    this._items = items;  // referenced by the row toggle handler
     // Fall back to the entity's friendly name when no title is set.
     // The stub config and editor write title:"" (not nullish), so a
     // plain `??` chain never reached the fallback for UI-created cards.
@@ -219,6 +220,10 @@ class HaikuboxBirdListCard extends HTMLElement {
           border-bottom: 1px solid var(--divider-color);
           cursor: pointer;
           user-select: none;
+        }
+        .row:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: -2px;
         }
 
         .thumb {
@@ -351,7 +356,7 @@ class HaikuboxBirdListCard extends HTMLElement {
           ${items.length === 0
             ? `<div class="empty">No data yet</div>`
             : items.map((item, i) => `
-                <div class="row" data-idx="${i}">
+                <div class="row" data-idx="${i}" role="button" tabindex="0" aria-expanded="${item.species === this._openSpecies ? "true" : "false"}">
                   ${item.image_url
                     ? `<img class="thumb" src="${_esc(item.image_url)}" alt="${_esc(item.species)}" loading="lazy">`
                     : `<div class="thumb-placeholder">🐦</div>`}
@@ -385,19 +390,34 @@ class HaikuboxBirdListCard extends HTMLElement {
       </ha-card>
     `;
 
-    this.shadowRoot.querySelector(".list").addEventListener("click", (e) => {
+    const list = this.shadowRoot.querySelector(".list");
+    list.addEventListener("click", (e) => {
+      const row = e.target.closest(".row");
+      if (row) this._toggleRow(row);
+    });
+    list.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
       const row = e.target.closest(".row");
       if (!row) return;
-      const idx = row.dataset.idx;
-      const species = items[idx]?.species ?? null;
-      const panel = this.shadowRoot.querySelector(`.expansion[data-idx="${idx}"]`);
-      const opening = !panel.classList.contains("is-open");
-      this.shadowRoot.querySelectorAll(".expansion").forEach(el => el.classList.remove("is-open"));
-      if (opening) panel.classList.add("is-open");
-      // Remember the expanded species so it survives the next poll
-      // re-render — the list re-orders, so track species not index.
-      this._openSpecies = opening ? species : null;
+      e.preventDefault();  // Space would otherwise scroll the list
+      this._toggleRow(row);
     });
+  }
+
+  _toggleRow(row) {
+    const idx = row.dataset.idx;
+    const species = this._items?.[idx]?.species ?? null;
+    const panel = this.shadowRoot.querySelector(`.expansion[data-idx="${idx}"]`);
+    const opening = !panel.classList.contains("is-open");
+    this.shadowRoot.querySelectorAll(".expansion").forEach(el => el.classList.remove("is-open"));
+    this.shadowRoot.querySelectorAll(".row").forEach(el => el.setAttribute("aria-expanded", "false"));
+    if (opening) {
+      panel.classList.add("is-open");
+      row.setAttribute("aria-expanded", "true");
+    }
+    // Remember the expanded species so it survives the next poll
+    // re-render — the list re-orders, so track species not index.
+    this._openSpecies = opening ? species : null;
   }
 
   getCardSize() {
