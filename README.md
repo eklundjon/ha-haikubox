@@ -122,7 +122,7 @@ entity: sensor.bird_shazam_top_species_this_year
 title: Top Species This Year   # optional; blank or omitted → entity friendly name
 top: 10                        # max items to render (default: 10)
 grid_options:
-  columns: 4
+  columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
 ```
 
@@ -140,7 +140,7 @@ entity: sensor.bird_shazam_top_species_this_year
 title: Top Species This Year
 top: 20
 grid_options:
-  columns: 4
+  columns: 12
   rows: 6
 
 # Daily top
@@ -148,7 +148,7 @@ type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_today
 title: Top Species Today
 grid_options:
-  columns: 4
+  columns: 12
   rows: 4
 
 # 7-day rarity
@@ -156,7 +156,7 @@ type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_rarest_species_7_days
 title: Unusual Birds This Week
 grid_options:
-  columns: 4
+  columns: 12
   rows: 4
 ```
 

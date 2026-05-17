@@ -426,11 +426,13 @@ class HaikuboxBirdListCard extends HTMLElement {
   }
 
   getGridOptions() {
+    // Sections grid is a 12-column scale. A ranked list wants full
+    // width and height; users can shrink to half / 3 rows.
     return {
-      columns: 4,
-      rows: 4,
-      min_columns: 2,
-      min_rows: 2,
+      columns: 12,
+      rows: 6,
+      min_columns: 6,
+      min_rows: 3,
     };
   }
 }
