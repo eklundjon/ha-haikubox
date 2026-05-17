@@ -296,11 +296,11 @@ class HaikuboxBirdCard extends HTMLElement {
     return 4;
   }
 
-  getLayoutOptions() {
+  getGridOptions() {
     return {
-      grid_columns: 2,
-      grid_min_columns: 2,
-      grid_max_columns: 6,
+      columns: 2,
+      min_columns: 2,
+      max_columns: 6,
     };
   }
 }

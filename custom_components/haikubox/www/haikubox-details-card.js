@@ -396,12 +396,12 @@ class HaikuboxBirdListCard extends HTMLElement {
     return Math.min(attrs.items?.length ?? 0, this._config.top) + 2;
   }
 
-  getLayoutOptions() {
+  getGridOptions() {
     return {
-      grid_columns: 4,
-      grid_rows: 4,
-      grid_min_columns: 2,
-      grid_min_rows: 2,
+      columns: 4,
+      rows: 4,
+      min_columns: 2,
+      min_rows: 2,
     };
   }
 }
