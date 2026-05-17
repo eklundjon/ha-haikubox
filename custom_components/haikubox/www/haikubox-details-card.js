@@ -362,8 +362,8 @@ class HaikuboxBirdListCard extends HTMLElement {
                         <div class="expansion-name">${_esc(item.species)}</div>
                         ${item.scientific_name ? `<div class="expansion-sci">${_esc(item.scientific_name)}</div>` : ""}
                         <div class="metrics">
-                          ${item.count != null ? `<div class="metric"><strong>${item.count}×</strong> ${_esc(this._periodLabel(item))}</div>` : ""}
-                          ${item.yearly_rank ? `<div class="metric">ranked <strong>#${item.yearly_rank}</strong> this year</div>` : ""}
+                          ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong> ${_esc(this._periodLabel(item))}</div>` : ""}
+                          ${item.yearly_rank ? `<div class="metric">ranked <strong>#${_esc(item.yearly_rank)}</strong> this year</div>` : ""}
                           ${this._relativeTime(item.last_seen) ? `<div class="metric">last heard <strong>${_esc(this._relativeTime(item.last_seen))}</strong></div>` : ""}
                         </div>
                       </div>
