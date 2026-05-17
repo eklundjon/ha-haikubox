@@ -113,7 +113,8 @@ class HaikuboxBirdCard extends HTMLElement {
 
   _relativeTime(isoString) {
     if (!isoString) return "";
-    const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+    // Clamp: a future timestamp (clock skew) must not show "-3s ago".
+    const diff = Math.max(0, Math.floor((Date.now() - new Date(isoString)) / 1000));
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
