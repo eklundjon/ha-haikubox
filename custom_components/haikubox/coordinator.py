@@ -43,7 +43,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry=entry,
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
-        self.serial = entry.data[CONF_SERIAL]
+        self.serial = serial = entry.data[CONF_SERIAL]
         self.device_name = entry.data.get(CONF_DEVICE_NAME, "Haikubox")
         self._session = async_get_clientsession(hass)
 
