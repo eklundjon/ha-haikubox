@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -77,6 +77,7 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
     _attr_translation_key = "recent_detections"
     _attr_icon = "mdi:bird"
     _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
@@ -135,6 +136,8 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
     _attr_translation_key = "daily_count"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = "detections"
+    # Accumulates through the day and resets to 0 at midnight.
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
@@ -159,6 +162,7 @@ class HaikuboxDailySpeciesSensor(_HaikuboxSensor):
     _attr_translation_key = "daily_species"
     _attr_icon = "mdi:bird"
     _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
@@ -278,6 +282,7 @@ class HaikuboxYearlyTopSensor(_HaikuboxSensor):
     _attr_translation_key = "yearly_top"
     _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
@@ -298,6 +303,7 @@ class HaikuboxDailyTopSensor(_HaikuboxSensor):
     _attr_translation_key = "daily_top"
     _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
@@ -318,6 +324,7 @@ class HaikuboxSevenDayRareSensor(_HaikuboxSensor):
     _attr_translation_key = "seven_day_rare"
     _attr_icon = "mdi:star-shooting"
     _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
