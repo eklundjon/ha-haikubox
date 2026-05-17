@@ -100,15 +100,21 @@ class HaikuboxBirdCard extends HTMLElement {
     // species name that often stays constant across polls while the
     // attributes (image, timestamp) change. last_changed only moves when
     // .state changes, so it would freeze the card on attribute-only updates.
+    // Always render at least once, even when the entity is missing
+    // (lastUpdated undefined): otherwise a misconfigured card would
+    // short-circuit forever and stay permanently blank instead of
+    // showing its empty state.
     const lastUpdated = stateObj?.last_updated;
-    if (lastUpdated === this._lastUpdated) return;
+    if (this._rendered && lastUpdated === this._lastUpdated) return;
     this._lastUpdated = lastUpdated;
+    this._rendered = true;
     this._render();
   }
 
   _relativeTime(isoString) {
     if (!isoString) return "";
-    const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+    // Clamp: a future timestamp (clock skew) must not show "-3s ago".
+    const diff = Math.max(0, Math.floor((Date.now() - new Date(isoString)) / 1000));
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -164,6 +170,15 @@ class HaikuboxBirdCard extends HTMLElement {
           width: 100%;
           height: 100%;
           object-fit: cover;
+        }
+        .img-placeholder {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--secondary-background-color);
+          font-size: 3em;
         }
         /* Body fills remaining space; justify-content centres text vertically */
         .body {
@@ -261,7 +276,9 @@ class HaikuboxBirdCard extends HTMLElement {
             <div class="empty">No recent detections</div>
           ` : `
             <div class="img-wrap">
-              <img src="${_esc(attrs.image_url ?? "")}" alt="${_esc(species)}">
+              ${attrs.image_url
+                ? `<img src="${_esc(attrs.image_url)}" alt="${_esc(species)}">`
+                : `<div class="img-placeholder">🐦</div>`}
             </div>
             <div class="body">
               <div class="text-group">
@@ -280,11 +297,11 @@ class HaikuboxBirdCard extends HTMLElement {
     return 4;
   }
 
-  getLayoutOptions() {
+  getGridOptions() {
     return {
-      grid_columns: 2,
-      grid_min_columns: 2,
-      grid_max_columns: 6,
+      columns: 2,
+      min_columns: 2,
+      max_columns: 6,
     };
   }
 }
