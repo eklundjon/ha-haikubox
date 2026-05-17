@@ -157,6 +157,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "daily_count": daily_count,
             "notable_detections": notable,
             "new_species": new_species,
+            "last_new_species": self._build_last_new_species(),
             "lifetime_species_count": len(self._seen_species),
             # Details datasets — built entirely from stores + current poll
             "yearly_top": self._build_yearly_top(),
@@ -304,6 +305,28 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "image_url": self._image_url_for(sp_code),
             })
         return result
+
+    def _build_last_new_species(self) -> dict[str, Any] | None:
+        """The species with the most recent first-detection, enriched.
+
+        Derived from the persisted seen_species log rather than held in
+        memory, so the value survives HA restarts and stays correct on
+        polls that introduce no new species.
+        """
+        if not self._seen_species:
+            return None
+        species, first_seen = max(
+            self._seen_species.items(), key=lambda kv: kv[1]
+        )
+        sp_code = self._sp_codes.get(species, "")
+        return {
+            "species": species,
+            "scientific_name": self._sci_names.get(species, ""),
+            "sp_code": sp_code,
+            "first_seen": first_seen,
+            "last_seen": self._last_seen.get(species),
+            "image_url": self._image_url_for(sp_code),
+        }
 
     # ------------------------------------------------------------------
     # Public properties (used by diagnostics)

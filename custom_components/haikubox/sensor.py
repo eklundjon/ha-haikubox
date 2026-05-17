@@ -52,7 +52,7 @@ class _HaikuboxSensor(CoordinatorEntity[HaikuboxCoordinator], SensorEntity):
             "detections",
             "notable_detections",
             "species_counts",
-            "new_today",
+            "recent_first_detections",
             "items",
         }
     )
@@ -218,9 +218,9 @@ class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
 class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
     """Tracks species never previously detected on this Haikubox.
 
-    State: common name of the most recently first-detected species.
-    First-detection log is persisted across HA restarts in
-    .storage/haikubox.<serial>.seen_species.
+    State: common name of the species with the most recent first
+    detection. Derived from the persisted seen_species log, so the value
+    is sticky across polls and survives HA restarts.
     """
 
     _attr_translation_key = "new_species"
@@ -230,35 +230,46 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_new_species"
 
-    def _new(self) -> list[dict]:
-        return self.coordinator.data.get("new_species", [])
+    def _latest(self) -> dict | None:
+        return self.coordinator.data.get("last_new_species")
 
     @property
     def native_value(self) -> str | None:
-        new = self._new()
-        return new[0].get("species") if new else None
+        d = self._latest()
+        return d.get("species") if d else None
 
     @property
     def entity_picture(self) -> str | None:
-        new = self._new()
-        return new[0].get("image_url") if new else None
+        d = self._latest()
+        return d.get("image_url") if d else None
 
     @property
     def extra_state_attributes(self) -> dict:
-        new = self._new()
-        return {
-            "new_today": [
+        d = self._latest()
+        base: dict = {
+            # Species first detected in the most recent poll only — usually
+            # empty. Named for what it is: the sticky state above is the
+            # headline value, this is the "just discovered" feed.
+            "recent_first_detections": [
                 {
-                    "species": d.get("species"),
-                    "scientific_name": d.get("scientific_name"),
-                    "sp_code": d.get("sp_code"),
-                    "first_seen": d.get("first_seen") or d.get("last_seen"),
-                    "image_url": d.get("image_url"),
+                    "species": x.get("species"),
+                    "scientific_name": x.get("scientific_name"),
+                    "sp_code": x.get("sp_code"),
+                    "first_seen": x.get("first_seen") or x.get("last_seen"),
+                    "image_url": x.get("image_url"),
                 }
-                for d in new
+                for x in self.coordinator.data.get("new_species", [])
             ],
             "lifetime_species_count": self.coordinator.data.get("lifetime_species_count", 0),
         }
+        if d:
+            base.update({
+                "scientific_name": d.get("scientific_name"),
+                "sp_code": d.get("sp_code"),
+                "first_seen": d.get("first_seen") or d.get("last_seen"),
+                "image_url": d.get("image_url"),
+            })
+        return base
 
 
 class HaikuboxYearlyTopSensor(_HaikuboxSensor):
