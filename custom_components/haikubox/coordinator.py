@@ -183,6 +183,18 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._yearly_items   = yearly    if isinstance(yearly, list)    else []
         self._seven_day_data = seven_day if isinstance(seven_day, dict) else {}
 
+        # Rehydrate the rank lookup from the persisted yearly list. Without
+        # this, _yearly_ranks/_yearly_total stay empty after a restart until
+        # the once-per-day yearly API fetch succeeds — so if that endpoint is
+        # down at restart, every species would score rarity 1.0 even though
+        # the data needed to score them is sitting in the store.
+        self._yearly_ranks = {
+            item["species"]: item["rank"]
+            for item in self._yearly_items
+            if isinstance(item, dict) and item.get("species") and item.get("rank")
+        }
+        self._yearly_total = len(self._yearly_ranks)
+
         # Create image cache directory and index existing files — one executor
         # call at startup, then all image lookups are in-memory.
         await self.hass.async_add_executor_job(self._init_image_cache)
