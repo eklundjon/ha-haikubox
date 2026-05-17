@@ -16,8 +16,9 @@ class HaikuboxBirdCardEditor extends HTMLElement {
     if (!this._built) {
       this._built = true;
       this._init();
-    } else if (this._picker) {
-      this._picker.value = config.entity ?? "";
+    } else {
+      if (this._picker) this._picker.value = config.entity ?? "";
+      if (this._action) this._action.value = config.tap_action ?? { action: "more-info" };
     }
   }
 
@@ -26,21 +27,24 @@ class HaikuboxBirdCardEditor extends HTMLElement {
     if (!this._built) {
       this._built = true;
       this._init();
-    } else if (this._picker) {
-      this._picker.hass = hass;
+    } else {
+      if (this._picker) this._picker.hass = hass;
+      if (this._action) this._action.hass = hass;
     }
+  }
+
+  _fire(update) {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: { ...this._config, ...update } },
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   async _init() {
     try {
       if (window.loadCardHelpers) await window.loadCardHelpers();
     } catch (_) { /* ignore */ }
-
-    const fire = (entity) => this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: { ...this._config, entity } },
-      bubbles: true,
-      composed: true,
-    }));
 
     let field;
     if (customElements.get("ha-entity-picker")) {
@@ -50,23 +54,39 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       field.includeDomains = ["sensor"];
       if (this._hass) field.hass = this._hass;
       field.value = this._config?.entity ?? "";
-      field.addEventListener("value-changed", (e) => fire(e.detail.value));
+      field.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
     } else if (customElements.get("ha-selector")) {
       field = document.createElement("ha-selector");
       field.label = "Entity";
       field.selector = { entity: { domain: ["sensor"] } };
       if (this._hass) field.hass = this._hass;
       field.value = this._config?.entity ?? "";
-      field.addEventListener("value-changed", (e) => fire(e.detail.value));
+      field.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
     } else {
       field = document.createElement("ha-textfield");
       field.label = "Entity ID";
       field.value = this._config?.entity ?? "";
-      field.addEventListener("change", (e) => fire(e.target.value));
+      field.addEventListener("change", (e) => this._fire({ entity: e.target.value }));
     }
     field.style.cssText = "display:block;padding:0 16px 16px";
     this._picker = field;
     this.appendChild(field);
+
+    // Tap action — HA's standard ui-action editor when available; the
+    // YAML tap_action option still works without it.
+    if (customElements.get("ha-selector")) {
+      const action = document.createElement("ha-selector");
+      action.label = "Tap action";
+      action.selector = {
+        ui_action: { actions: ["more-info", "navigate", "url", "none"] },
+      };
+      if (this._hass) action.hass = this._hass;
+      action.value = this._config?.tap_action ?? { action: "more-info" };
+      action.addEventListener("value-changed", (e) => this._fire({ tap_action: e.detail.value }));
+      action.style.cssText = "display:block;padding:0 16px 16px";
+      this._action = action;
+      this.appendChild(action);
+    }
   }
 }
 
@@ -85,12 +105,15 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { entity: "" };
+    return { entity: "", tap_action: { action: "more-info" } };
   }
 
   setConfig(config) {
     if (config.entity === undefined) throw new Error("'entity' is required");
-    this._config = config;
+    // tap_action follows HA's standard schema. Default to more-info
+    // (HA's universal default for entity-bound cards); { action: "none" }
+    // restores the card's previous inert behaviour.
+    this._config = { tap_action: { action: "more-info" }, ...config };
   }
 
   set hass(hass) {
@@ -121,11 +144,50 @@ class HaikuboxBirdCard extends HTMLElement {
     return `${Math.floor(diff / 86400)}d ago`;
   }
 
+  _fillTokens(str) {
+    const stateObj = this._hass?.states[this._config.entity];
+    const species = stateObj?.state ?? "";
+    const attrs = stateObj?.attributes ?? {};
+    return String(str).replace(
+      /\{(species|sp_code|scientific_name)\}/g,
+      (_, key) => {
+        const value =
+          key === "species" ? species
+          : key === "sp_code" ? (attrs.sp_code ?? "")
+          : (attrs.scientific_name ?? "");
+        return encodeURIComponent(value);
+      },
+    );
+  }
+
+  _handleTapAction() {
+    const cfg = this._config.tap_action ?? { action: "more-info" };
+    const action = cfg.action ?? "more-info";
+    if (action === "none") return;
+    if (action === "more-info") {
+      const entityId = cfg.entity ?? this._config.entity;
+      if (!entityId) return;
+      this.dispatchEvent(new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      }));
+    } else if (action === "navigate") {
+      if (!cfg.navigation_path) return;
+      history.pushState(null, "", this._fillTokens(cfg.navigation_path));
+      window.dispatchEvent(new Event("location-changed"));
+    } else if (action === "url") {
+      if (!cfg.url_path) return;
+      window.open(this._fillTokens(cfg.url_path), "_blank", "noreferrer");
+    }
+  }
+
   _render() {
     const stateObj = this._hass?.states[this._config.entity];
     const species = stateObj?.state;
     const attrs = stateObj?.attributes ?? {};
     const empty = !species || ["unknown", "unavailable"].includes(species);
+    const actionable = (this._config.tap_action?.action ?? "more-info") !== "none";
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -138,6 +200,11 @@ class HaikuboxBirdCard extends HTMLElement {
           overflow: hidden;
           height: 100%;
           padding: 0;
+        }
+        ha-card.actionable { cursor: pointer; }
+        ha-card.actionable:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: -2px;
         }
         .layout {
           display: flex;
@@ -270,7 +337,7 @@ class HaikuboxBirdCard extends HTMLElement {
           font-style: italic;
         }
       </style>
-      <ha-card>
+      <ha-card class="${actionable ? "actionable" : ""}"${actionable ? ' role="button" tabindex="0"' : ""}>
         <div class="layout">
           ${empty ? `
             <div class="empty">No recent detections</div>
@@ -291,6 +358,16 @@ class HaikuboxBirdCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+
+    if (actionable) {
+      const card = this.shadowRoot.querySelector("ha-card");
+      card.addEventListener("click", () => this._handleTapAction());
+      card.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();  // Space would otherwise scroll the page
+        this._handleTapAction();
+      });
+    }
   }
 
   getCardSize() {
