@@ -110,6 +110,34 @@ The card ships sensible size defaults via `getGridOptions()`; resize it from the
 
 Works with any sensor that exposes `image_url`, `scientific_name`, and `last_seen` attributes (e.g. `last_detected`, `notable_detection`).
 
+#### Tap action
+
+The card uses Home Assistant's standard `tap_action` schema. Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `navigate`, `url`, and `none` (card is inert, the pre-0.4 behaviour).
+
+`navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded and filled from the card's bound entity — so the action can be specific to the bird currently shown:
+
+```yaml
+# Open an external page for the bird currently displayed.
+# Substitute whatever URL scheme the target site uses; this just
+# shows token substitution.
+type: custom:haikubox-bird-card
+entity: sensor.bird_shazam_last_detected
+tap_action:
+  action: url
+  url_path: https://www.google.com/search?q={scientific_name}+bird
+```
+
+```yaml
+# Jump to a dashboard view, anchored to the species
+type: custom:haikubox-bird-card
+entity: sensor.bird_shazam_most_unusual_recent_detection
+tap_action:
+  action: navigate
+  navigation_path: /lovelace-birds/species#{species}
+```
+
+The visual editor exposes a **Tap action** picker; the YAML option works with or without it.
+
 ---
 
 ### `haikubox-bird-list-card`
