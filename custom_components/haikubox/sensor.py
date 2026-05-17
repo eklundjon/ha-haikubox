@@ -41,6 +41,22 @@ class _HaikuboxSensor(CoordinatorEntity[HaikuboxCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
 
+    # These attributes carry the bulk list payloads consumed by the custom
+    # cards (species lists, per-day detections, ranked items). They stay on
+    # the live state object so the frontend can read them, but the recorder
+    # must not persist them on every state change — each can run to dozens
+    # of rows with images/scientific names and would bloat the history DB
+    # and trip HA's state-attribute size warnings.
+    _unrecorded_attributes = frozenset(
+        {
+            "detections",
+            "notable_detections",
+            "species_counts",
+            "new_today",
+            "items",
+        }
+    )
+
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator)
         self._serial = serial
