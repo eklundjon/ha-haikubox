@@ -100,9 +100,14 @@ class HaikuboxBirdCard extends HTMLElement {
     // species name that often stays constant across polls while the
     // attributes (image, timestamp) change. last_changed only moves when
     // .state changes, so it would freeze the card on attribute-only updates.
+    // Always render at least once, even when the entity is missing
+    // (lastUpdated undefined): otherwise a misconfigured card would
+    // short-circuit forever and stay permanently blank instead of
+    // showing its empty state.
     const lastUpdated = stateObj?.last_updated;
-    if (lastUpdated === this._lastUpdated) return;
+    if (this._rendered && lastUpdated === this._lastUpdated) return;
     this._lastUpdated = lastUpdated;
+    this._rendered = true;
     this._render();
   }
 
