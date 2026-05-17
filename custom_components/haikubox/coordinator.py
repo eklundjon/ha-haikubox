@@ -271,10 +271,17 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
 
     def _image_url_for(self, sp_code: str) -> str | None:
-        """Return local image URL if the file is cached, else None."""
-        if not sp_code or sp_code not in self._cached_images:
+        """Local cached image URL if available, else the remote S3 URL.
+
+        Mirrors _cache_image's fallback so the list cards show the photo
+        instead of a placeholder before it has been cached locally. None
+        only when there is no species code at all.
+        """
+        if not sp_code:
             return None
-        return f"/local/haikubox/{sp_code}.jpeg"
+        if sp_code in self._cached_images:
+            return f"/local/haikubox/{sp_code}.jpeg"
+        return f"{IMAGES_BASE}/{sp_code}.jpeg"
 
     def _build_yearly_top(self) -> list[dict[str, Any]]:
         """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
