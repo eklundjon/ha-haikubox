@@ -1,7 +1,7 @@
 # Haikubox for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.4+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
+[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.11+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bird audio detection devices. Surfaces recent detections, daily and yearly species counts, and highlights unusual visitors — all with bird photos and custom Lovelace cards.
@@ -52,7 +52,7 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.recent_detections` | Species count in current 1-hour window | `detections` — list with `species`, `scientific_name`, `last_seen`, `rarity_score` |
 | `sensor.last_detected` | Most recently heard species | `last_seen`, `scientific_name`, `image_url` |
 | `sensor.notable_detection` | Most unusual species in the current window | `notable_detections` — full list sorted by rarity; `rarity_score`, `yearly_rank` |
-| `sensor.new_species` | Most recently first-detected species | `new_today` list, `lifetime_species_count` |
+| `sensor.new_species` | Most recently first-detected species | `recent_first_detections` list, `lifetime_species_count` |
 | `sensor.daily_count` | Total detections today | `species_counts` — per-species breakdown |
 | `sensor.daily_species` | Distinct species heard today | — |
 
@@ -87,7 +87,7 @@ The `notable_detection` sensor and 7-day rare sensor score each species against 
 
 ## Custom cards
 
-The integration registers three custom Lovelace cards automatically — no manual resource configuration required.
+The integration registers two custom Lovelace cards automatically — no manual resource configuration required.
 
 ### `haikubox-bird-card`
 
@@ -96,9 +96,9 @@ Displays a single bird detection with a photo, species name, scientific name, an
 ```yaml
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_most_unusual_recent_detection
-layout_options:
-  grid_columns: 2
-  grid_rows: 3
+grid_options:
+  columns: 6
+  rows: 4
 ```
 
 The card is fully responsive to both width and height:
@@ -106,7 +106,7 @@ The card is fully responsive to both width and height:
 - **Portrait** — photo fills the card width up to a square (1:1), text is centred below. When space is tight, the scientific name is dropped and the photo shrinks to maintain at most a 3:2 aspect ratio.
 - **Wide** — when the card is wider than 3:2, the photo moves to the left and text appears on the right.
 
-Use `grid_columns` and `grid_rows` in `layout_options` to control size (defaults: 2 columns, no locked rows). The card adapts gracefully at any reasonable aspect ratio.
+The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio. (Requires Home Assistant 2024.11+ for the sections grid sizing API.)
 
 Works with any sensor that exposes `image_url`, `scientific_name`, and `last_seen` attributes (e.g. `last_detected`, `notable_detection`).
 
@@ -119,16 +119,16 @@ A ranked species list with tap-to-expand detail rows. Works with all three bird 
 ```yaml
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_this_year
-title: Top Species This Year   # optional; omit to use entity friendly name, "" for no title
+title: Top Species This Year   # optional; blank or omitted → entity friendly name
 top: 10                        # max items to render (default: 10)
-layout_options:
-  grid_columns: 4              # default
-  grid_rows: 4                 # controls card height; list scrolls if content exceeds it
+grid_options:
+  columns: 4
+  rows: 4                      # controls card height; list scrolls if content exceeds it
 ```
 
 Tapping any row slides open an expanded view showing a larger photo, scientific name, and contextual metrics:
 
-- **All lists** — detection count with period context ("47× this year", "8× today", "3× this week") and last heard timestamp
+- **All lists** — detection count with period context ("47× this year", "8× today", "3× in one day") and last heard timestamp
 - **7-day rare list** — also shows yearly rank ("ranked #62 this year")
 
 The badge adapts automatically — no different card type is needed for each sensor. Point it at whichever sensor you want:
@@ -139,25 +139,25 @@ type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_this_year
 title: Top Species This Year
 top: 20
-layout_options:
-  grid_columns: 4
-  grid_rows: 6
+grid_options:
+  columns: 4
+  rows: 6
 
 # Daily top
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_top_species_today
 title: Top Species Today
-layout_options:
-  grid_columns: 4
-  grid_rows: 4
+grid_options:
+  columns: 4
+  rows: 4
 
 # 7-day rarity
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_rarest_species_7_days
 title: Unusual Birds This Week
-layout_options:
-  grid_columns: 4
-  grid_rows: 4
+grid_options:
+  columns: 4
+  rows: 4
 ```
 
 ---
