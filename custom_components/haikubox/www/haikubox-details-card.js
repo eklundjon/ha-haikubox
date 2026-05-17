@@ -352,7 +352,7 @@ class HaikuboxBirdListCard extends HTMLElement {
                     ${item.scientific_name ? `<div class="sub">${_esc(item.scientific_name)}</div>` : ""}
                   </div>
                 </div>
-                <div class="expansion" data-idx="${i}">
+                <div class="expansion${item.species === this._openSpecies ? " is-open" : ""}" data-idx="${i}">
                   <div class="expansion-inner">
                     <div class="expansion-body">
                       ${item.image_url
@@ -380,10 +380,14 @@ class HaikuboxBirdListCard extends HTMLElement {
       const row = e.target.closest(".row");
       if (!row) return;
       const idx = row.dataset.idx;
+      const species = items[idx]?.species ?? null;
       const panel = this.shadowRoot.querySelector(`.expansion[data-idx="${idx}"]`);
       const opening = !panel.classList.contains("is-open");
       this.shadowRoot.querySelectorAll(".expansion").forEach(el => el.classList.remove("is-open"));
       if (opening) panel.classList.add("is-open");
+      // Remember the expanded species so it survives the next poll
+      // re-render — the list re-orders, so track species not index.
+      this._openSpecies = opening ? species : null;
     });
   }
 
