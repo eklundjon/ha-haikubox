@@ -10,6 +10,7 @@
     "frontend"
   ],
   "documentation": "https://github.com/eklundjon/ha-haikubox",
+  "integration_type": "device",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/eklundjon/ha-haikubox/issues",
   "requirements": [

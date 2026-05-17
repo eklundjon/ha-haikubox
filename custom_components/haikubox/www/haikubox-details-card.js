@@ -124,9 +124,13 @@ class HaikuboxBirdListCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const stateObj = hass?.states[this._config?.entity];
-    const lastChanged = stateObj?.last_changed;
-    if (lastChanged === this._lastChanged) return;
-    this._lastChanged = lastChanged;
+    // Gate on last_updated, not last_changed: this entity's state is an
+    // item count that rarely changes, while the ranked `items` attribute
+    // re-orders frequently. last_changed only moves when .state changes,
+    // so it would freeze the list on attribute-only updates.
+    const lastUpdated = stateObj?.last_updated;
+    if (lastUpdated === this._lastUpdated) return;
+    this._lastUpdated = lastUpdated;
     this._render();
   }
 

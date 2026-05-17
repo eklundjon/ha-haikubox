@@ -8,6 +8,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.loader import async_get_integration
 
 from .const import CONF_DEVICE_NAME, CONF_SERIAL, DOMAIN
 from .coordinator import HaikuboxCoordinator
@@ -28,11 +29,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register static paths and inject card JS once at integration load time."""
     www = Path(__file__).parent
     await hass.http.async_register_static_paths([
-        StaticPathConfig(url, str(www / path), cache_headers=False)
+        StaticPathConfig(url, str(www / path))
         for url, path in _CARDS
     ])
+    integration = await async_get_integration(hass, DOMAIN)
+    version = integration.version or "dev"
     for url, _ in _CARDS:
-        add_extra_js_url(hass, url)
+        # The ?v= query busts the browser cache on upgrade; without it,
+        # default cache headers would serve a stale card after an update.
+        add_extra_js_url(hass, f"{url}?v={version}")
     return True
 
 
