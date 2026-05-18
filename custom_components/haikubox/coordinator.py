@@ -161,19 +161,28 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         daily_count = _normalise_daily_count(daily_raw)
 
+        # Every list the sensors expose carries a 1-based `rank` reflecting
+        # that sensor's own ordering criterion. Each list is sorted by its
+        # criterion, then _ranked() stamps the position. (yearly_top already
+        # carries its yearly rank from _process_yearly_count.)
+        new_by_recency = sorted(
+            new_species,
+            key=lambda d: d.get("first_seen") or d.get("last_seen") or "",
+            reverse=True,
+        )
+
         return {
-            "detections": detections,
+            "detections": _ranked(detections),            # by recency
             "last_detected": self._last_detected,
             "last_notable": self._last_notable,
-            "daily_count": daily_count,
-            "notable_detections": notable,
-            "new_species": new_species,
+            "daily_count": daily_count,                    # raw {species, count} — total only
+            "daily_top": _ranked(self._build_daily_list(daily_count)),    # by today's count
+            "notable_detections": _ranked(notable),       # by rarity
+            "new_species": _ranked(new_by_recency),        # by first-seen recency
             "last_new_species": self._build_last_new_species(),
             "lifetime_species_count": len(self._seen_species),
-            # Details datasets — built entirely from stores + current poll
-            "yearly_top": self._build_yearly_top(),
-            "daily_top": self._build_daily_top(daily_count),
-            "seven_day_rare": seven_day_rare,
+            "yearly_top": self._build_yearly_top(),        # by yearly count (own rank)
+            "seven_day_rare": _ranked(seven_day_rare),     # by rarity
         }
 
     # ------------------------------------------------------------------
@@ -288,8 +297,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             })
         return result
 
-    def _build_daily_top(self, daily_count: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Daily count list enriched with sp_code, scientific_name, last_seen, and image."""
+    def _build_daily_list(self, daily_count: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Today's species (count desc) enriched with sp_code, scientific_name, last_seen, image."""
         result = []
         for item in daily_count:
             sp = item["species"]
@@ -461,3 +470,14 @@ def _normalise_daily_count(raw: Any) -> list[dict[str, Any]]:
         result.append({"species": item.get("bird", "Unknown"), "count": int(item.get("count", 0))})
 
     return sorted(result, key=lambda x: x["count"], reverse=True)
+
+
+def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return copies stamped with a 1-based `rank` reflecting list order.
+
+    Callers sort by their own criterion first, so a species' `rank` means
+    "position by this sensor's measure" (recency, rarity, count, …). Copies
+    are returned so the same underlying detection dict can be ranked
+    differently across the recent / notable / new-species lists.
+    """
+    return [{**record, "rank": index + 1} for index, record in enumerate(records)]

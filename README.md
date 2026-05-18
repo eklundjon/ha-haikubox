@@ -47,26 +47,31 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 
 ### Core sensors
 
-| Entity | State | Key attributes |
+| Entity | State | Notable attributes |
 |---|---|---|
-| `sensor.recent_detections` | Species count in current 1-hour window | `detections` — list with `species`, `scientific_name`, `last_seen`, `rarity_score` |
+| `sensor.recent_detections` | Species count in current 1-hour window | `detections` (ranked by recency) |
 | `sensor.last_detected` | Most recently heard species | `last_seen`, `scientific_name`, `image_url` |
-| `sensor.notable_detection` | Most unusual species in the current window | `notable_detections` — full list sorted by rarity; `rarity_score`, `yearly_rank` |
-| `sensor.new_species` | Most recently first-detected species | `recent_first_detections` list, `lifetime_species_count` |
-| `sensor.daily_count` | Total detections today | `species_counts` — per-species breakdown |
-| `sensor.daily_species` | Distinct species heard today | — |
+| `sensor.notable_detection` | Most unusual species in the current window | `detections` (ranked by rarity); `rarity_score`, `yearly_rank` |
+| `sensor.new_species` | Most recently first-detected species | `detections` (ranked by first-seen recency), `lifetime_species_count` |
+| `sensor.daily_count` | Total detections today | — (total counter) |
+| `sensor.daily_top` | Number of species heard today | `detections` (ranked by today's count) |
+| `sensor.top_species_this_year` | Number of species in yearly baseline | `detections` (ranked by yearly count) |
+| `sensor.rarest_species_7_days` | Species in rolling 7-day window | `detections` (ranked by rarity) |
 
-### Bird details sensors
+### The `detections` contract
 
-These sensors expose ranked species lists and are designed to be used with the `haikubox-bird-list-card` custom card. Each exposes its data under an `items` attribute.
+Every list-bearing sensor exposes its list under a single **`detections`** attribute. Each item is `{ species, scientific_name, sp_code, image_url, last_seen, rank, … }` (individual sensors also add `count`, `rarity_score`, `yearly_rank`, or `first_seen`). **`rank`** is a 1-based position assigned by *that sensor's own measure*:
 
-| Entity | State | `items` contents |
+| Sensor | `rank` 1 is | Basis |
 |---|---|---|
-| `sensor.top_species_this_year` | Number of species in yearly baseline | `species`, `scientific_name`, `count`, `rank`, `last_seen`, `image_url` |
-| `sensor.top_species_today` | Number of species heard today | `species`, `scientific_name`, `count`, `last_seen`, `image_url` |
-| `sensor.rarest_species_7_days` | Number of species in rolling 7-day window | `species`, `scientific_name`, `count`, `yearly_rank`, `last_seen`, `image_url` |
+| `recent_detections` | most recently heard | `last_seen` desc |
+| `notable_detection` | most unusual | `rarity_score` desc |
+| `new_species` | most recently first-seen | `first_seen` desc |
+| `daily_top` | most detected today | today's `count` desc |
+| `top_species_this_year` | most detected this year | yearly `count` |
+| `rarest_species_7_days` | rarest in last 7 days | `rarity_score` desc |
 
-`scientific_name` and `last_seen` on yearly and daily sensors accumulate over time as species pass through detection polls. The 7-day rarity sensor has full metadata immediately.
+Any of these can drive the `haikubox-bird-list-card`. On a fresh install, `scientific_name`/`last_seen`/photos for the yearly sensor backfill over time as species pass through live detection polls; the recent/notable/7-day sensors have full metadata immediately.
 
 ### Rarity scoring
 
@@ -142,7 +147,7 @@ The visual editor exposes a **Tap action** picker; the YAML option works with or
 
 ### `haikubox-bird-list-card`
 
-A ranked species list with tap-to-expand detail rows. Works with all three bird details sensors.
+A ranked species list with tap-to-expand detail rows. Works with **any** list-bearing sensor — they all expose the same [`detections` contract](#the-detections-contract).
 
 ```yaml
 type: custom:haikubox-bird-list-card
@@ -154,12 +159,9 @@ grid_options:
   rows: 4                      # controls card height; list scrolls if content exceeds it
 ```
 
-Tapping any row slides open an expanded view showing a larger photo, scientific name, and contextual metrics:
+Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table above), photo, and scientific name. Tapping a row expands it to a larger photo plus `count×` and a "last heard" timestamp where the sensor provides them.
 
-- **All lists** — detection count with period context ("47× this year", "8× today", "3× in one day") and last heard timestamp
-- **7-day rare list** — also shows yearly rank ("ranked #62 this year")
-
-The badge adapts automatically — no different card type is needed for each sensor. Point it at whichever sensor you want:
+Point it at any list-bearing sensor:
 
 ```yaml
 # Yearly top
@@ -171,9 +173,9 @@ grid_options:
   columns: 12
   rows: 6
 
-# Daily top
+# Today's species (by count)
 type: custom:haikubox-bird-list-card
-entity: sensor.bird_shazam_top_species_today
+entity: sensor.bird_shazam_daily_top
 title: Top Species Today
 grid_options:
   columns: 12
@@ -186,6 +188,8 @@ title: Unusual Birds This Week
 grid_options:
   columns: 12
   rows: 4
+
+# Also valid: recent_detections, notable_detection, new_species
 ```
 
 ---
@@ -207,7 +211,7 @@ sections:
   - type: grid
     cards:
       - type: custom:haikubox-bird-list-card
-        entity: sensor.bird_shazam_top_species_today
+        entity: sensor.bird_shazam_daily_top
         title: Top Species Today
         top: 10
   - type: grid

@@ -125,9 +125,9 @@ class HaikuboxBirdListCard extends HTMLElement {
     this._hass = hass;
     const stateObj = hass?.states[this._config?.entity];
     // Gate on last_updated, not last_changed: this entity's state is an
-    // item count that rarely changes, while the ranked `items` attribute
-    // re-orders frequently. last_changed only moves when .state changes,
-    // so it would freeze the list on attribute-only updates.
+    // item count that rarely changes, while the ranked `detections`
+    // attribute re-orders frequently. last_changed only moves when
+    // .state changes, so it would freeze on attribute-only updates.
     // Always render at least once, even when the entity is missing
     // (lastUpdated undefined): otherwise a misconfigured card would
     // short-circuit forever and stay permanently blank instead of
@@ -140,16 +140,9 @@ class HaikuboxBirdListCard extends HTMLElement {
   }
 
   _rank(item, index) {
-    if (item.rank != null) return `#${item.rank}`;
-    return `#${index + 1}`;
-  }
-
-  _periodLabel(item) {
-    if (item.rank != null) return "this year";
-    // 7-day-rare items: count is detections on a single day within the
-    // window (not a weekly total), so don't imply "this week".
-    if (item.rarity_score != null) return "in one day";
-    return "today";
+    // Every sensor stamps `rank` per its own criterion; index is a
+    // defensive fallback only.
+    return `#${item.rank ?? index + 1}`;
   }
 
   _relativeTime(isoString) {
@@ -165,7 +158,7 @@ class HaikuboxBirdListCard extends HTMLElement {
   _render() {
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
-    const items = (attrs.items ?? []).slice(0, this._config.top);
+    const items = (attrs.detections ?? []).slice(0, this._config.top);
     this._items = items;  // referenced by the row toggle handler
     // Fall back to the entity's friendly name when no title is set.
     // The stub config and editor write title:"" (not nullish), so a
@@ -376,8 +369,7 @@ class HaikuboxBirdListCard extends HTMLElement {
                         <div class="expansion-name">${_esc(item.species)}</div>
                         ${item.scientific_name ? `<div class="expansion-sci">${_esc(item.scientific_name)}</div>` : ""}
                         <div class="metrics">
-                          ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong> ${_esc(this._periodLabel(item))}</div>` : ""}
-                          ${item.yearly_rank ? `<div class="metric">ranked <strong>#${_esc(item.yearly_rank)}</strong> this year</div>` : ""}
+                          ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
                           ${this._relativeTime(item.last_seen) ? `<div class="metric">last heard <strong>${_esc(this._relativeTime(item.last_seen))}</strong></div>` : ""}
                         </div>
                       </div>
@@ -422,7 +414,7 @@ class HaikuboxBirdListCard extends HTMLElement {
 
   getCardSize() {
     const attrs = this._hass?.states[this._config.entity]?.attributes ?? {};
-    return Math.min(attrs.items?.length ?? 0, this._config.top) + 2;
+    return Math.min(attrs.detections?.length ?? 0, this._config.top) + 2;
   }
 
   getGridOptions() {

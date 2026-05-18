@@ -41,8 +41,8 @@
       "daily_count": {
         "name": "Birds detected today"
       },
-      "daily_species": {
-        "name": "Species heard today"
+      "daily_top": {
+        "name": "Top species today"
       },
       "notable_detection": {
         "name": "Most unusual recent detection"
@@ -52,9 +52,6 @@
       },
       "yearly_top": {
         "name": "Top species this year"
-      },
-      "daily_top": {
-        "name": "Top species today"
       },
       "seven_day_rare": {
         "name": "Rarest species (7 days)"
