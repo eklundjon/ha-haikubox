@@ -37,13 +37,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
-# 0.4 renamed two event sensors; migrate their entity-registry entries
-# so existing installs keep history / entity_ids instead of orphaning.
-# (daily_species was removed and attribute renames aren't unique_id
-# changes, so those aren't — and can't be — migrated here.)
+# 0.4 renamed sensors for naming consistency; migrate their
+# entity-registry entries so existing installs keep history / entity_ids
+# instead of orphaning. (daily_species was removed and attribute renames
+# aren't unique_id changes, so those aren't — and can't be — migrated.)
 _UNIQUE_ID_RENAMES = {
     "last_detected": "last_detection",
     "new_species": "new_detection",
+    "daily_top": "daily_detections",
+    "yearly_top": "yearly_detections",
+    "seven_day_rare": "unusual_detections",
 }
 
 

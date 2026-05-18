@@ -145,14 +145,14 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
 class HaikuboxDailyTopSensor(_HaikuboxSensor):
     """Top species by detection count over the trailing 24 hours."""
 
-    _attr_translation_key = "daily_top"
+    _attr_translation_key = "daily_detections"
     _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_daily_top"
+        self._attr_unique_id = f"{serial}_daily_detections"
 
     @property
     def native_value(self) -> int:
@@ -265,14 +265,14 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
 class HaikuboxYearlyTopSensor(_HaikuboxSensor):
     """Top species by detection count for the current calendar year."""
 
-    _attr_translation_key = "yearly_top"
+    _attr_translation_key = "yearly_detections"
     _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_yearly_top"
+        self._attr_unique_id = f"{serial}_yearly_detections"
 
     @property
     def native_value(self) -> int:
@@ -286,14 +286,14 @@ class HaikuboxYearlyTopSensor(_HaikuboxSensor):
 class HaikuboxSevenDayRareSensor(_HaikuboxSensor):
     """Species with the highest rarity score seen in the rolling 7-day window."""
 
-    _attr_translation_key = "seven_day_rare"
+    _attr_translation_key = "unusual_detections"
     _attr_icon = "mdi:star-shooting"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_seven_day_rare"
+        self._attr_unique_id = f"{serial}_unusual_detections"
 
     @property
     def native_value(self) -> int:
