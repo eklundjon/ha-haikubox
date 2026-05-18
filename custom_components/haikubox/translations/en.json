@@ -33,10 +33,10 @@
   "entity": {
     "sensor": {
       "recent_detections": {
-        "name": "Recent species detected"
+        "name": "Species detected (1 h)"
       },
-      "last_detected": {
-        "name": "Last detected species"
+      "last_detection": {
+        "name": "Last detection"
       },
       "daily_count": {
         "name": "Birds detected (24 h)"
@@ -45,16 +45,16 @@
         "name": "Top species (24 h)"
       },
       "notable_detection": {
-        "name": "Most unusual recent detection"
+        "name": "Notable detection"
       },
-      "new_species": {
-        "name": "New species detected"
+      "new_detection": {
+        "name": "New detection"
       },
       "yearly_top": {
-        "name": "Top species this year"
+        "name": "Top species (this year)"
       },
       "seven_day_rare": {
-        "name": "Rarest species (7 days)"
+        "name": "Rarest species (7 d)"
       }
     }
   }

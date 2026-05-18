@@ -86,12 +86,12 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
 class HaikuboxLastDetectedSensor(_HaikuboxSensor):
     """Name of the most recently detected species."""
 
-    _attr_translation_key = "last_detected"
+    _attr_translation_key = "last_detection"
     _attr_icon = "mdi:bird"
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_last_detected"
+        self._attr_unique_id = f"{serial}_last_detection"
 
     def _latest(self) -> dict | None:
         return self.coordinator.data.get("last_detected")
@@ -217,12 +217,12 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
     is sticky across polls and survives HA restarts.
     """
 
-    _attr_translation_key = "new_species"
+    _attr_translation_key = "new_detection"
     _attr_icon = "mdi:new-box"
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_new_species"
+        self._attr_unique_id = f"{serial}_new_detection"
 
     def _latest(self) -> dict | None:
         return self.coordinator.data.get("last_new_species")

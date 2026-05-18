@@ -4,11 +4,11 @@ from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.loader import async_get_integration
 
-from .const import DOMAIN
+from .const import CONF_SERIAL, DOMAIN
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -37,7 +37,34 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+# 0.4 renamed two event sensors; migrate their entity-registry entries
+# so existing installs keep history / entity_ids instead of orphaning.
+# (daily_species was removed and attribute renames aren't unique_id
+# changes, so those aren't — and can't be — migrated here.)
+_UNIQUE_ID_RENAMES = {
+    "last_detected": "last_detection",
+    "new_species": "new_detection",
+}
+
+
+@callback
+def _migrate_unique_ids(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None:
+    """One-time: rename old sensor unique_ids to their 0.4 equivalents."""
+    registry = er.async_get(hass)
+    serial = entry.data[CONF_SERIAL]
+    for old_suffix, new_suffix in _UNIQUE_ID_RENAMES.items():
+        old_uid = f"{serial}_{old_suffix}"
+        new_uid = f"{serial}_{new_suffix}"
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, old_uid)
+        if entity_id is None:
+            continue  # fresh install or already migrated
+        if registry.async_get_entity_id("sensor", DOMAIN, new_uid) is not None:
+            continue  # target already exists — don't collide
+        registry.async_update_entity(entity_id, new_unique_id=new_uid)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> bool:
+    _migrate_unique_ids(hass, entry)
     coordinator = HaikuboxCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
