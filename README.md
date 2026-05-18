@@ -12,8 +12,8 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 - **Last detected species** — persists the most recently heard bird, never goes unknown between detections
 - **Most unusual recent detection** — ranked by rarity against your box's own yearly baseline; also persists across quiet windows
 - **New species detected** — flags species appearing for the first time ever on your box, backed by persistent storage that survives HA restarts
-- **Daily counts** — total detections and distinct species heard today
-- **Bird details sensors** — top species this year, top species today, and rarest species over the past 7 days
+- **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
+- **Bird details sensors** — top species this year, top species (last 24 h), and rarest species over the past 7 days
 - **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views
 - Bird photos cached locally for offline resilience
 
@@ -53,8 +53,8 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.last_detected` | Most recently heard species | `last_seen`, `scientific_name`, `image_url` |
 | `sensor.notable_detection` | Most unusual species in the current window | `detections` (ranked by rarity); `rarity_score`, `yearly_rank` |
 | `sensor.new_species` | Most recently first-detected species | `detections` (ranked by first-seen recency), `lifetime_species_count` |
-| `sensor.daily_count` | Total detections today | — (total counter) |
-| `sensor.daily_top` | Number of species heard today | `detections` (ranked by today's count) |
+| `sensor.daily_count` | Total detections, past 24 h | — (total counter) |
+| `sensor.daily_top` | Number of species, past 24 h | `detections` (ranked by 24h count) |
 | `sensor.top_species_this_year` | Number of species in yearly baseline | `detections` (ranked by yearly count) |
 | `sensor.rarest_species_7_days` | Species in rolling 7-day window | `detections` (ranked by rarity) |
 
@@ -67,7 +67,7 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 | `recent_detections` | most recently heard | `last_seen` desc |
 | `notable_detection` | most unusual | `rarity_score` desc |
 | `new_species` | most recently first-seen | `first_seen` desc |
-| `daily_top` | most detected today | today's `count` desc |
+| `daily_top` | most detected in last 24 h | 24h `count` desc |
 | `top_species_this_year` | most detected this year | yearly `count` |
 | `rarest_species_7_days` | rarest in last 7 days | `rarity_score` desc |
 
@@ -173,10 +173,10 @@ grid_options:
   columns: 12
   rows: 6
 
-# Today's species (by count)
+# Top species, last 24 h (by count)
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_daily_top
-title: Top Species Today
+title: Top Species (24 h)
 grid_options:
   columns: 12
   rows: 4
@@ -212,7 +212,7 @@ sections:
     cards:
       - type: custom:haikubox-bird-list-card
         entity: sensor.bird_shazam_daily_top
-        title: Top Species Today
+        title: Top Species (24 h)
         top: 10
   - type: grid
     cards:
@@ -224,7 +224,7 @@ sections:
 
 ## Polling
 
-By default the integration polls the Haikubox API every **10 minutes**, requesting a 1-hour detection window. The yearly species baseline is refreshed once per calendar day.
+By default the integration polls the Haikubox API every **10 minutes**, requesting a 1-hour detection window plus a 24-hour window for the rolling 24 h sensors (`daily_count`, `daily_top`). The yearly species baseline is refreshed once per calendar day.
 
 ### Changing the polling cadence
 

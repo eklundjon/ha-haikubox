@@ -120,19 +120,21 @@ class HaikuboxLastDetectedSensor(_HaikuboxSensor):
 
 
 class HaikuboxDailyCountSensor(_HaikuboxSensor):
-    """Total individual detections recorded today."""
+    """Total individual detections over the trailing 24 hours."""
 
     _attr_translation_key = "daily_count"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = "detections"
-    # Accumulates through the day and resets to 0 at midnight.
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # Rolling 24h total: rises and falls as the window slides, so it is a
+    # MEASUREMENT, not a TOTAL_INCREASING counter (which would treat every
+    # decrease as a meter reset and corrupt long-term statistics).
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_daily_count"
 
-    # Pure total counter — the today species list lives on daily_top.
+    # Pure total counter — the 24h species list lives on daily_top.
     @property
     def native_value(self) -> int:
         return sum(
@@ -141,7 +143,7 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
 
 
 class HaikuboxDailyTopSensor(_HaikuboxSensor):
-    """Top species by detection count for today."""
+    """Top species by detection count over the trailing 24 hours."""
 
     _attr_translation_key = "daily_top"
     _attr_icon = "mdi:chart-bar"

@@ -16,6 +16,7 @@ from .const import (
     API_BASE,
     CONF_DEVICE_NAME,
     CONF_SERIAL,
+    DAILY_WINDOW_HOURS,
     DEFAULT_SCAN_INTERVAL,
     DETECTION_HOURS,
     DOMAIN,
@@ -99,8 +100,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Could not fetch yearly counts: %s", err)
 
         try:
-            detections_raw = await self._fetch_detections()
-            daily_raw = await self._fetch_daily_count()
+            detections_raw = await self._fetch_detections(DETECTION_HOURS)
+            daily_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with Haikubox API: {err}") from err
 
@@ -159,7 +160,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if notable:
             self._last_notable = notable[0]
 
-        daily_count = _normalise_daily_count(daily_raw)
+        # "Daily" sensors use a true trailing 24-hour window derived from
+        # /detections (not the server-side calendar-day /daily-count),
+        # ordered by detection count so daily_top ranks by 24h volume.
+        daily_count = sorted(
+            _normalise_detections(daily_raw),
+            key=lambda x: x.get("count", 0),
+            reverse=True,
+        )
+        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_total)
 
         # Every list the sensors expose carries a 1-based `rank` reflecting
         # that sensor's own ordering criterion. Each list is sorted by its
@@ -175,8 +184,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "detections": _ranked(detections),            # by recency
             "last_detected": self._last_detected,
             "last_notable": self._last_notable,
-            "daily_count": daily_count,                    # raw {species, count} — total only
-            "daily_top": _ranked(self._build_daily_list(daily_count)),    # by today's count
+            "daily_count": daily_count,                    # 24h per-species — total only
+            "daily_top": _ranked(self._build_daily_list(daily_count)),    # by 24h count
             "notable_detections": _ranked(notable),       # by rarity
             "new_species": _ranked(new_by_recency),        # by first-seen recency
             "last_new_species": self._build_last_new_species(),
@@ -354,15 +363,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # HTTP helpers
     # ------------------------------------------------------------------
 
-    async def _fetch_detections(self) -> Any:
+    async def _fetch_detections(self, hours: int) -> Any:
         url = f"{API_BASE}/haikubox/{self.serial}/detections"
-        async with self._session.get(url, params={"hours": DETECTION_HOURS}) as resp:
-            resp.raise_for_status()
-            return await resp.json()
-
-    async def _fetch_daily_count(self) -> Any:
-        url = f"{API_BASE}/haikubox/{self.serial}/daily-count"
-        async with self._session.get(url) as resp:
+        async with self._session.get(url, params={"hours": hours}) as resp:
             resp.raise_for_status()
             return await resp.json()
 
@@ -455,21 +458,6 @@ def _apply_rarity_scores(
         rank = yearly_ranks.get(d["species"], yearly_total + 1)
         d["yearly_rank"] = rank
         d["rarity_score"] = round(rank / denom, 4)
-
-
-def _normalise_daily_count(raw: Any) -> list[dict[str, Any]]:
-    """Return a list of {species, count} sorted by count descending."""
-    if not isinstance(raw, list):
-        _LOGGER.debug("Unexpected daily-count payload type: %s", type(raw))
-        return []
-
-    result: list[dict[str, Any]] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        result.append({"species": item.get("bird", "Unknown"), "count": int(item.get("count", 0))})
-
-    return sorted(result, key=lambda x: x["count"], reverse=True)
 
 
 def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -39,10 +39,10 @@
         "name": "Last detected species"
       },
       "daily_count": {
-        "name": "Birds detected today"
+        "name": "Birds detected (24 h)"
       },
       "daily_top": {
-        "name": "Top species today"
+        "name": "Top species (24 h)"
       },
       "notable_detection": {
         "name": "Most unusual recent detection"
