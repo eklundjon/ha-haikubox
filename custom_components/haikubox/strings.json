@@ -39,7 +39,7 @@
         "name": "Last detection"
       },
       "daily_count": {
-        "name": "Birds detected (24 h)"
+        "name": "Total detections (24 h)"
       },
       "daily_detections": {
         "name": "Daily detections (24 h)"

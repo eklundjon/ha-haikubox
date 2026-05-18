@@ -64,7 +64,7 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
     """Number of species detected in the past hour."""
 
     _attr_translation_key = "recent_detections"
-    _attr_icon = "mdi:bird"
+    _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
