@@ -269,6 +269,11 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
             base.update({
                 "scientific_name": d.get("scientific_name"),
                 "sp_code": d.get("sp_code"),
+                # last_seen keeps this sensor's attribute contract aligned
+                # with last_detected / notable_detection so the bird card
+                # always has a timestamp; first_seen is retained because
+                # it is the meaningful date for a *new* species.
+                "last_seen": d.get("last_seen"),
                 "first_seen": d.get("first_seen") or d.get("last_seen"),
                 "image_url": d.get("image_url"),
             })
