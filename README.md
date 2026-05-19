@@ -21,9 +21,9 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 
 ### HACS (recommended)
 
-1. Open HACS → **Integrations** → ⋮ → **Custom repositories**
-2. Add `https://github.com/eklundjon/ha-haikubox` with category **Integration**
-3. Search for **Haikubox** and install
+1. In **HACS**, open the **⋮** menu (top right) → **Custom repositories**
+2. Add `https://github.com/eklundjon/ha-haikubox`, type **Integration**, then **Add**
+3. Search HACS for **Haikubox**, open it, and click **Download**
 4. Restart Home Assistant
 
 ### Manual
@@ -45,7 +45,7 @@ To change the serial number later, go to the integration entry and select **Reco
 
 All entities are grouped under a single device per Haikubox. Entity IDs are prefixed with your device name (e.g. `sensor.bird_shazam_*`).
 
-### Core sensors
+### Sensors
 
 | Entity | State | Notable attributes |
 |---|---|---|
@@ -71,11 +71,11 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 | `yearly_top_species` | most detected this calendar year | yearly `count` |
 | `rarest_species` | rarest in last 7 days | `rarity_score` desc |
 
-Any of these can drive the `haikubox-bird-list-card`. On a fresh install, `scientific_name`/`last_seen`/photos for the yearly sensor backfill over time as species pass through live detection polls; the recent/notable/7-day sensors have full metadata immediately.
+Any of these can drive the `haikubox-bird-list-card`. `recent_detections` and `notable_species` come straight from the live detection feed (full metadata immediately). `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` fills in as its 7-day window accumulates.
 
 ### Rarity scoring
 
-The `notable_species` sensor and the `rarest_species` sensor score each species against your box's own yearly history. A species absent from the yearly top-75 scores `1.0`; the most commonly detected species scores close to `0`. This means a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
+The `notable_species` and `rarest_species` sensors score each species against your box's own yearly history. A species not present in your box's yearly data scores ≈`1.0` (maximally unusual); the most-detected species scores near `0`. So a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
 
 ### Persistent state
 
@@ -113,13 +113,13 @@ The card is fully responsive to both width and height:
 
 The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio. (Requires Home Assistant 2024.11+ for the sections grid sizing API.)
 
-Works with any sensor that exposes `image_url`, `scientific_name`, and `last_seen` attributes (e.g. `last_detection`, `notable_species`).
+Works with **any** Haikubox sensor: the event/sticky sensors (`last_detection`, `notable_species`, `new_species`) render the bird from their state; the list sensors (`recent_detections`, `daily_top_species`, `yearly_top_species`, `rarest_species`) render their #1 ranked bird from `detections`.
 
 #### Tap action
 
 The card uses Home Assistant's standard `tap_action` schema. Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `navigate`, `url`, and `none` (card is inert, the pre-0.4 behaviour).
 
-`navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded and filled from the card's bound entity — so the action can be specific to the bird currently shown:
+`navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded from the bound entity's state/attributes. On the event/sticky sensors (`last_detection`/`notable_species`/`new_species`) these match the bird shown; on list sensors the tokens read the entity state/attributes, **not** the displayed #1 item — so use species-specific tap actions with the event sensors:
 
 ```yaml
 # Open an external page for the bird currently displayed.
@@ -218,7 +218,7 @@ sections:
     cards:
       - type: custom:haikubox-bird-list-card
         entity: sensor.bird_shazam_rarest_species
-        title: Unusual Birds This Week
+        title: Rarest species (7 d)
         top: 10
 ```
 
