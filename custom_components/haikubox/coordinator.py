@@ -162,7 +162,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # "Daily" sensors use a true trailing 24-hour window derived from
         # /detections (not the server-side calendar-day /daily-count),
-        # ordered by detection count so daily_detections ranks by 24h volume.
+        # ordered by detection count so daily_top_species ranks by 24h volume.
         daily_count = sorted(
             _normalise_detections(daily_raw),
             key=lambda x: x.get("count", 0),
@@ -172,7 +172,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Every list the sensors expose carries a 1-based `rank` reflecting
         # that sensor's own ordering criterion. Each list is sorted by its
-        # criterion, then _ranked() stamps the position. (yearly_detections
+        # criterion, then _ranked() stamps the position. (yearly_top_species
         # already carries its yearly rank from _process_yearly_count.)
         new_by_recency = sorted(
             new_species,
@@ -188,13 +188,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_detection": self._last_detected,           # sticky
             "notable_detection": self._last_notable,         # sticky
             "daily_count": daily_count,                      # 24h per-species — total only
-            "daily_detections": _ranked(self._build_daily_list(daily_count)),  # by 24h count
+            "daily_top_species": _ranked(self._build_daily_list(daily_count)),  # by 24h count
             "notable_detections": _ranked(notable),          # by rarity
             "new_detections": _ranked(new_by_recency),       # by first-seen recency
             "new_detection": self._build_last_new_species(), # sticky
             "lifetime_species_count": len(self._seen_species),
-            "yearly_detections": self._build_yearly_top(),   # by yearly count (own rank)
-            "unusual_detections": _ranked(seven_day_rare),   # by rarity
+            "yearly_top_species": self._build_yearly_top(),  # by yearly count (own rank)
+            "rarest_species": _ranked(seven_day_rare),       # by rarity
         }
 
     # ------------------------------------------------------------------

@@ -41,20 +41,20 @@
       "daily_count": {
         "name": "Total detections (24 h)"
       },
-      "daily_detections": {
-        "name": "Daily detections (24 h)"
+      "daily_top_species": {
+        "name": "Top species (24 h)"
       },
-      "notable_detection": {
-        "name": "Notable detection"
+      "notable_species": {
+        "name": "Notable species"
       },
-      "new_detection": {
-        "name": "New detection"
+      "new_species": {
+        "name": "New species"
       },
-      "yearly_detections": {
-        "name": "Yearly detections"
+      "yearly_top_species": {
+        "name": "Top species (this calendar year)"
       },
-      "unusual_detections": {
-        "name": "Unusual detections (7 d)"
+      "rarest_species": {
+        "name": "Rarest species (7 d)"
       }
     }
   }
