@@ -36,7 +36,7 @@ The `notable_species` and `rarest_species` sensors score each species against yo
 
 ## Persistent state
 
-`last_detection` and `notable_species` never clear between polls. The following data is written to `.storage/` and survives HA restarts:
+`last_detection` and `notable_species` never clear between polls and also survive HA restarts (their last value is persisted and rehydrated on startup). The following data is written to `.storage/` and survives HA restarts:
 
 | Store file | Contents |
 |---|---|
@@ -46,3 +46,4 @@ The `notable_species` and `rarest_species` sensors score each species against yo
 | `haikubox.<serial>.last_seen` | Species → most recent detection timestamp |
 | `haikubox.<serial>.yearly` | Yearly species baseline |
 | `haikubox.<serial>.seven_day` | Rolling 7-day detection data |
+| `haikubox.<serial>.sticky` | Last `last_detection` / `notable_species` records |

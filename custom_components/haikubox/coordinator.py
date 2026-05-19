@@ -53,7 +53,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._yearly_total: int = 0
         self._yearly_fetched_date: date | None = None
 
-        # Sticky records — set on first detection, never cleared
+        # Sticky records — set on first detection, never cleared; persisted
+        # so last_detection / notable_species survive an HA restart instead
+        # of resetting to "unknown" until the next live detection.
         self._last_detected: dict[str, Any] | None = None
         self._last_notable: dict[str, Any] | None = None
 
@@ -64,6 +66,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_seen_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_seen")
         self._yearly_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.yearly")
         self._seven_day_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.seven_day")
+        self._sticky_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sticky")
 
         # In-memory store state
         self._seen_species: dict[str, str] = {}          # species → first_seen ISO
@@ -153,12 +156,22 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Update 7-day rolling store with today's detections
         seven_day_rare = await self._update_seven_day(detections, today)
 
+        sticky_dirty = False
         if detections:
+            if not self._last_detected or detections[0].get("species") != self._last_detected.get("species"):
+                sticky_dirty = True
             self._last_detected = detections[0]
 
         notable = sorted(detections, key=lambda x: x["rarity_score"], reverse=True)
         if notable:
+            if not self._last_notable or notable[0].get("species") != self._last_notable.get("species"):
+                sticky_dirty = True
             self._last_notable = notable[0]
+
+        if sticky_dirty:
+            await self._sticky_store.async_save(
+                {"last_detected": self._last_detected, "last_notable": self._last_notable}
+            )
 
         # "Daily" sensors use a true trailing 24-hour window derived from
         # /detections (not the server-side calendar-day /daily-count),
@@ -208,6 +221,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         last_seen = await self._last_seen_store.async_load()
         yearly    = await self._yearly_store.async_load()
         seven_day = await self._seven_day_store.async_load()
+        sticky    = await self._sticky_store.async_load()
 
         self._seen_species   = seen      if isinstance(seen, dict)      else {}
         self._sp_codes       = sp_codes  if isinstance(sp_codes, dict)  else {}
@@ -215,6 +229,17 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_seen      = last_seen if isinstance(last_seen, dict) else {}
         self._yearly_items   = yearly    if isinstance(yearly, list)    else []
         self._seven_day_data = seven_day if isinstance(seven_day, dict) else {}
+
+        # Rehydrate the sticky records so last_detection / notable_species
+        # show their last value immediately after a restart instead of
+        # "unknown" until the next live detection.
+        if isinstance(sticky, dict):
+            ld = sticky.get("last_detected")
+            ln = sticky.get("last_notable")
+            if isinstance(ld, dict):
+                self._last_detected = ld
+            if isinstance(ln, dict):
+                self._last_notable = ln
 
         # Rehydrate the rank lookup from the persisted yearly list. Without
         # this, _yearly_ranks/_yearly_total stay empty after a restart until
