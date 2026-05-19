@@ -23,13 +23,13 @@ async def async_setup_entry(
     async_add_entities(
         [
             HaikuboxRecentDetectionsSensor(coordinator, serial),
-            HaikuboxLastDetectedSensor(coordinator, serial),
+            HaikuboxLastDetectionSensor(coordinator, serial),
             HaikuboxDailyCountSensor(coordinator, serial),
-            HaikuboxDailyTopSensor(coordinator, serial),
+            HaikuboxDailyDetectionsSensor(coordinator, serial),
             HaikuboxNotableDetectionSensor(coordinator, serial),
-            HaikuboxNewSpeciesSensor(coordinator, serial),
-            HaikuboxYearlyTopSensor(coordinator, serial),
-            HaikuboxSevenDayRareSensor(coordinator, serial),
+            HaikuboxNewDetectionSensor(coordinator, serial),
+            HaikuboxYearlyDetectionsSensor(coordinator, serial),
+            HaikuboxUnusualDetectionsSensor(coordinator, serial),
         ]
     )
 
@@ -74,16 +74,16 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("detections", []))
+        return len(self.coordinator.data.get("recent_detections", []))
 
     @property
     def extra_state_attributes(self) -> dict:
         return {
-            "detections": self.coordinator.data.get("detections", []),
+            "detections": self.coordinator.data.get("recent_detections", []),
         }
 
 
-class HaikuboxLastDetectedSensor(_HaikuboxSensor):
+class HaikuboxLastDetectionSensor(_HaikuboxSensor):
     """Name of the most recently detected species."""
 
     _attr_translation_key = "last_detection"
@@ -94,7 +94,7 @@ class HaikuboxLastDetectedSensor(_HaikuboxSensor):
         self._attr_unique_id = f"{serial}_last_detection"
 
     def _latest(self) -> dict | None:
-        return self.coordinator.data.get("last_detected")
+        return self.coordinator.data.get("last_detection")
 
     @property
     def native_value(self) -> str | None:
@@ -134,7 +134,7 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_daily_count"
 
-    # Pure total counter — the 24h species list lives on daily_top.
+    # Pure total counter — the 24h species list lives on daily_detections.
     @property
     def native_value(self) -> int:
         return sum(
@@ -142,8 +142,8 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
         )
 
 
-class HaikuboxDailyTopSensor(_HaikuboxSensor):
-    """Top species by detection count over the trailing 24 hours."""
+class HaikuboxDailyDetectionsSensor(_HaikuboxSensor):
+    """Species detected over the trailing 24 hours, ranked by count."""
 
     _attr_translation_key = "daily_detections"
     _attr_icon = "mdi:chart-bar"
@@ -156,11 +156,11 @@ class HaikuboxDailyTopSensor(_HaikuboxSensor):
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("daily_top", []))
+        return len(self.coordinator.data.get("daily_detections", []))
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"detections": self.coordinator.data.get("daily_top", [])}
+        return {"detections": self.coordinator.data.get("daily_detections", [])}
 
 
 class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
@@ -179,7 +179,7 @@ class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
         self._attr_unique_id = f"{serial}_notable_detection"
 
     def _top(self) -> dict | None:
-        return self.coordinator.data.get("last_notable")
+        return self.coordinator.data.get("notable_detection")
 
     @property
     def native_value(self) -> str | None:
@@ -209,7 +209,7 @@ class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
         return base
 
 
-class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
+class HaikuboxNewDetectionSensor(_HaikuboxSensor):
     """Tracks species never previously detected on this Haikubox.
 
     State: common name of the species with the most recent first
@@ -225,7 +225,7 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
         self._attr_unique_id = f"{serial}_new_detection"
 
     def _latest(self) -> dict | None:
-        return self.coordinator.data.get("last_new_species")
+        return self.coordinator.data.get("new_detection")
 
     @property
     def native_value(self) -> str | None:
@@ -244,7 +244,7 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
             # Species first detected in the most recent poll, ranked by
             # first-seen recency — usually empty. The sticky state above is
             # the headline value; this is the "just discovered" feed.
-            "detections": self.coordinator.data.get("new_species", []),
+            "detections": self.coordinator.data.get("new_detections", []),
             "lifetime_species_count": self.coordinator.data.get("lifetime_species_count", 0),
         }
         if d:
@@ -262,8 +262,8 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
         return base
 
 
-class HaikuboxYearlyTopSensor(_HaikuboxSensor):
-    """Top species by detection count for the current calendar year."""
+class HaikuboxYearlyDetectionsSensor(_HaikuboxSensor):
+    """Species detected this calendar year, ranked by count."""
 
     _attr_translation_key = "yearly_detections"
     _attr_icon = "mdi:chart-bar"
@@ -276,15 +276,15 @@ class HaikuboxYearlyTopSensor(_HaikuboxSensor):
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("yearly_top", []))
+        return len(self.coordinator.data.get("yearly_detections", []))
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"detections": self.coordinator.data.get("yearly_top", [])}
+        return {"detections": self.coordinator.data.get("yearly_detections", [])}
 
 
-class HaikuboxSevenDayRareSensor(_HaikuboxSensor):
-    """Species with the highest rarity score seen in the rolling 7-day window."""
+class HaikuboxUnusualDetectionsSensor(_HaikuboxSensor):
+    """Rarest species over the rolling 7-day window (highest rarity score)."""
 
     _attr_translation_key = "unusual_detections"
     _attr_icon = "mdi:star-shooting"
@@ -297,8 +297,8 @@ class HaikuboxSevenDayRareSensor(_HaikuboxSensor):
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("seven_day_rare", []))
+        return len(self.coordinator.data.get("unusual_detections", []))
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"detections": self.coordinator.data.get("seven_day_rare", [])}
+        return {"detections": self.coordinator.data.get("unusual_detections", [])}
