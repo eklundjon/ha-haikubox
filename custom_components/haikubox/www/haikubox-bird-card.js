@@ -184,9 +184,21 @@ class HaikuboxBirdCard extends HTMLElement {
 
   _render() {
     const stateObj = this._hass?.states[this._config.entity];
-    const species = stateObj?.state;
     const attrs = stateObj?.attributes ?? {};
-    const empty = !species || ["unknown", "unavailable"].includes(species);
+    const st = stateObj?.state;
+    // Event sensors carry the bird in the state (a species name). List
+    // sensors carry a ranked `detections` list and a numeric state (a
+    // count) — fall back to detections[0], the top-ranked item by that
+    // sensor's own measure, so the card works pointed at any sensor.
+    const stateIsSpecies =
+      st && !["unknown", "unavailable"].includes(st) && isNaN(Number(st));
+    const top = Array.isArray(attrs.detections) ? attrs.detections[0] : null;
+    const bird = stateIsSpecies
+      ? { species: st, image_url: attrs.image_url, scientific_name: attrs.scientific_name, last_seen: attrs.last_seen }
+      : top
+        ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen }
+        : null;
+    const empty = !bird || !bird.species;
     const actionable = (this._config.tap_action?.action ?? "more-info") !== "none";
 
     this.shadowRoot.innerHTML = `
@@ -343,15 +355,15 @@ class HaikuboxBirdCard extends HTMLElement {
             <div class="empty">No recent detections</div>
           ` : `
             <div class="img-wrap">
-              ${attrs.image_url
-                ? `<img src="${_esc(attrs.image_url)}" alt="${_esc(species)}">`
+              ${bird.image_url
+                ? `<img src="${_esc(bird.image_url)}" alt="${_esc(bird.species)}">`
                 : `<div class="img-placeholder">🐦</div>`}
             </div>
             <div class="body">
               <div class="text-group">
-                <div class="species">${_esc(species)}</div>
-                <div class="scientific">${_esc(attrs.scientific_name ?? "")}</div>
-                <div class="time">${_esc(this._relativeTime(attrs.last_seen))}</div>
+                <div class="species">${_esc(bird.species)}</div>
+                <div class="scientific">${_esc(bird.scientific_name ?? "")}</div>
+                <div class="time">${_esc(this._relativeTime(bird.last_seen))}</div>
               </div>
             </div>
           `}
