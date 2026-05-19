@@ -9,11 +9,11 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 ## Features
 
 - **Recent detections** — species heard in the last hour, updated every 10 minutes
-- **Last detected species** — persists the most recently heard bird, never goes unknown between detections
-- **Most unusual recent detection** — ranked by rarity against your box's own yearly baseline; also persists across quiet windows
-- **New species detected** — flags species appearing for the first time ever on your box, backed by persistent storage that survives HA restarts
-- **Daily counts** — total detections and distinct species heard today
-- **Bird details sensors** — top species this year, top species today, and rarest species over the past 7 days
+- **Last detection** — persists the most recently heard bird, never goes unknown between detections
+- **Notable species** — most unusual recent bird, ranked by rarity against your box's own yearly baseline; also persists across quiet windows
+- **New species** — flags species appearing for the first time ever on your box, backed by persistent storage that survives HA restarts
+- **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
+- **Bird details sensors** — top species this calendar year, top species (last 24 h), and rarest species over the past 7 days
 - **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views
 - Bird photos cached locally for offline resilience
 
@@ -47,34 +47,39 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 
 ### Core sensors
 
-| Entity | State | Key attributes |
+| Entity | State | Notable attributes |
 |---|---|---|
-| `sensor.recent_detections` | Species count in current 1-hour window | `detections` — list with `species`, `scientific_name`, `last_seen`, `rarity_score` |
-| `sensor.last_detected` | Most recently heard species | `last_seen`, `scientific_name`, `image_url` |
-| `sensor.notable_detection` | Most unusual species in the current window | `notable_detections` — full list sorted by rarity; `rarity_score`, `yearly_rank` |
-| `sensor.new_species` | Most recently first-detected species | `recent_first_detections` list, `lifetime_species_count` |
-| `sensor.daily_count` | Total detections today | `species_counts` — per-species breakdown |
-| `sensor.daily_species` | Distinct species heard today | — |
+| `sensor.recent_detections` | Species count in current 1-hour window | `detections` (ranked by recency) |
+| `sensor.last_detection` | Most recently heard species | `last_seen`, `scientific_name`, `image_url` |
+| `sensor.notable_species` | Most unusual species in the current window | `detections` (ranked by rarity); `rarity_score`, `yearly_rank` |
+| `sensor.new_species` | Most recently first-detected species | `detections` (ranked by first-seen recency), `lifetime_species_count` |
+| `sensor.daily_count` | Total detections, past 24 h | — (total counter) |
+| `sensor.daily_top_species` | Number of species, past 24 h | `detections` (ranked by 24h count) |
+| `sensor.yearly_top_species` | Number of species this calendar year | `detections` (ranked by yearly count) |
+| `sensor.rarest_species` | Number of species, rolling 7 d | `detections` (ranked by rarity) |
 
-### Bird details sensors
+### The `detections` contract
 
-These sensors expose ranked species lists and are designed to be used with the `haikubox-bird-list-card` custom card. Each exposes its data under an `items` attribute.
+Every list-bearing sensor exposes its list under a single **`detections`** attribute. Each item is `{ species, scientific_name, sp_code, image_url, last_seen, rank, … }` (individual sensors also add `count`, `rarity_score`, `yearly_rank`, or `first_seen`). **`rank`** is a 1-based position assigned by *that sensor's own measure*:
 
-| Entity | State | `items` contents |
+| Sensor | `rank` 1 is | Basis |
 |---|---|---|
-| `sensor.top_species_this_year` | Number of species in yearly baseline | `species`, `scientific_name`, `count`, `rank`, `last_seen`, `image_url` |
-| `sensor.top_species_today` | Number of species heard today | `species`, `scientific_name`, `count`, `last_seen`, `image_url` |
-| `sensor.rarest_species_7_days` | Number of species in rolling 7-day window | `species`, `scientific_name`, `count`, `yearly_rank`, `last_seen`, `image_url` |
+| `recent_detections` | most recently heard | `last_seen` desc |
+| `notable_species` | most unusual | `rarity_score` desc |
+| `new_species` | most recently first-seen | `first_seen` desc |
+| `daily_top_species` | most detected in last 24 h | 24h `count` desc |
+| `yearly_top_species` | most detected this calendar year | yearly `count` |
+| `rarest_species` | rarest in last 7 days | `rarity_score` desc |
 
-`scientific_name` and `last_seen` on yearly and daily sensors accumulate over time as species pass through detection polls. The 7-day rarity sensor has full metadata immediately.
+Any of these can drive the `haikubox-bird-list-card`. On a fresh install, `scientific_name`/`last_seen`/photos for the yearly sensor backfill over time as species pass through live detection polls; the recent/notable/7-day sensors have full metadata immediately.
 
 ### Rarity scoring
 
-The `notable_detection` sensor and 7-day rare sensor score each species against your box's own yearly history. A species absent from the yearly top-75 scores `1.0`; the most commonly detected species scores close to `0`. This means a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
+The `notable_species` sensor and the `rarest_species` sensor score each species against your box's own yearly history. A species absent from the yearly top-75 scores `1.0`; the most commonly detected species scores close to `0`. This means a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
 
 ### Persistent state
 
-`last_detected` and `notable_detection` never clear between polls. The following data is written to `.storage/` and survives HA restarts:
+`last_detection` and `notable_species` never clear between polls. The following data is written to `.storage/` and survives HA restarts:
 
 | Store file | Contents |
 |---|---|
@@ -95,7 +100,7 @@ Displays a single bird detection with a photo, species name, scientific name, an
 
 ```yaml
 type: custom:haikubox-bird-card
-entity: sensor.bird_shazam_most_unusual_recent_detection
+entity: sensor.bird_shazam_notable_species
 grid_options:
   columns: 6
   rows: 4
@@ -108,7 +113,7 @@ The card is fully responsive to both width and height:
 
 The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio. (Requires Home Assistant 2024.11+ for the sections grid sizing API.)
 
-Works with any sensor that exposes `image_url`, `scientific_name`, and `last_seen` attributes (e.g. `last_detected`, `notable_detection`).
+Works with any sensor that exposes `image_url`, `scientific_name`, and `last_seen` attributes (e.g. `last_detection`, `notable_species`).
 
 #### Tap action
 
@@ -121,7 +126,7 @@ The card uses Home Assistant's standard `tap_action` schema. Supported actions: 
 # Substitute whatever URL scheme the target site uses; this just
 # shows token substitution.
 type: custom:haikubox-bird-card
-entity: sensor.bird_shazam_last_detected
+entity: sensor.bird_shazam_last_detection
 tap_action:
   action: url
   url_path: https://www.google.com/search?q={scientific_name}+bird
@@ -130,7 +135,7 @@ tap_action:
 ```yaml
 # Jump to a dashboard view, anchored to the species
 type: custom:haikubox-bird-card
-entity: sensor.bird_shazam_most_unusual_recent_detection
+entity: sensor.bird_shazam_notable_species
 tap_action:
   action: navigate
   navigation_path: /lovelace-birds/species#{species}
@@ -142,50 +147,49 @@ The visual editor exposes a **Tap action** picker; the YAML option works with or
 
 ### `haikubox-bird-list-card`
 
-A ranked species list with tap-to-expand detail rows. Works with all three bird details sensors.
+A ranked species list with tap-to-expand detail rows. Works with **any** list-bearing sensor — they all expose the same [`detections` contract](#the-detections-contract).
 
 ```yaml
 type: custom:haikubox-bird-list-card
-entity: sensor.bird_shazam_top_species_this_year
-title: Top Species This Year   # optional; blank or omitted → entity friendly name
+entity: sensor.bird_shazam_yearly_top_species
+title: Top Species This Calendar Year   # optional; blank or omitted → entity friendly name
 top: 10                        # max items to render (default: 10)
 grid_options:
   columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
 ```
 
-Tapping any row slides open an expanded view showing a larger photo, scientific name, and contextual metrics:
+Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table above), photo, and scientific name. Tapping a row expands it to a larger photo plus `count×` and a "last heard" timestamp where the sensor provides them.
 
-- **All lists** — detection count with period context ("47× this year", "8× today", "3× in one day") and last heard timestamp
-- **7-day rare list** — also shows yearly rank ("ranked #62 this year")
-
-The badge adapts automatically — no different card type is needed for each sensor. Point it at whichever sensor you want:
+Point it at any list-bearing sensor:
 
 ```yaml
-# Yearly top
+# Top species (this calendar year)
 type: custom:haikubox-bird-list-card
-entity: sensor.bird_shazam_top_species_this_year
-title: Top Species This Year
+entity: sensor.bird_shazam_yearly_top_species
+title: Top Species This Calendar Year
 top: 20
 grid_options:
   columns: 12
   rows: 6
 
-# Daily top
+# Top species (24 h)
 type: custom:haikubox-bird-list-card
-entity: sensor.bird_shazam_top_species_today
-title: Top Species Today
+entity: sensor.bird_shazam_daily_top_species
+title: Top Species (24 h)
 grid_options:
   columns: 12
   rows: 4
 
-# 7-day rarity
+# Rarest species (7 d)
 type: custom:haikubox-bird-list-card
-entity: sensor.bird_shazam_rarest_species_7_days
-title: Unusual Birds This Week
+entity: sensor.bird_shazam_rarest_species
+title: Rarest Species (7 d)
 grid_options:
   columns: 12
   rows: 4
+
+# Also valid: recent_detections, notable_species, new_species
 ```
 
 ---
@@ -201,26 +205,26 @@ sections:
   - type: grid
     cards:
       - type: custom:haikubox-bird-list-card
-        entity: sensor.bird_shazam_top_species_this_year
-        title: Top Species This Year
+        entity: sensor.bird_shazam_yearly_top_species
+        title: Top Species This Calendar Year
         top: 20
   - type: grid
     cards:
       - type: custom:haikubox-bird-list-card
-        entity: sensor.bird_shazam_top_species_today
-        title: Top Species Today
+        entity: sensor.bird_shazam_daily_top_species
+        title: Top Species (24 h)
         top: 10
   - type: grid
     cards:
       - type: custom:haikubox-bird-list-card
-        entity: sensor.bird_shazam_rarest_species_7_days
+        entity: sensor.bird_shazam_rarest_species
         title: Unusual Birds This Week
         top: 10
 ```
 
 ## Polling
 
-By default the integration polls the Haikubox API every **10 minutes**, requesting a 1-hour detection window. The yearly species baseline is refreshed once per calendar day.
+By default the integration polls the Haikubox API every **10 minutes**, requesting a 1-hour detection window plus a 24-hour window for the rolling 24 h sensors (`daily_count`, `daily_top_species`). The yearly species baseline is refreshed once per calendar day.
 
 ### Changing the polling cadence
 
@@ -238,7 +242,7 @@ automation:
     actions:
       - action: homeassistant.update_entity
         target:
-          entity_id: sensor.bird_shazam_last_detected
+          entity_id: sensor.bird_shazam_last_detection
 ```
 
 This is Home Assistant's built-in, integration-agnostic mechanism for a custom polling interval — see the [HA docs on polling](https://www.home-assistant.io/common-tasks/general/#defining-a-custom-polling-interval).

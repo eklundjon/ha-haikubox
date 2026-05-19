@@ -23,14 +23,13 @@ async def async_setup_entry(
     async_add_entities(
         [
             HaikuboxRecentDetectionsSensor(coordinator, serial),
-            HaikuboxLastDetectedSensor(coordinator, serial),
+            HaikuboxLastDetectionSensor(coordinator, serial),
             HaikuboxDailyCountSensor(coordinator, serial),
-            HaikuboxDailySpeciesSensor(coordinator, serial),
-            HaikuboxNotableDetectionSensor(coordinator, serial),
+            HaikuboxDailyTopSpeciesSensor(coordinator, serial),
+            HaikuboxNotableSpeciesSensor(coordinator, serial),
             HaikuboxNewSpeciesSensor(coordinator, serial),
-            HaikuboxYearlyTopSensor(coordinator, serial),
-            HaikuboxDailyTopSensor(coordinator, serial),
-            HaikuboxSevenDayRareSensor(coordinator, serial),
+            HaikuboxYearlyTopSpeciesSensor(coordinator, serial),
+            HaikuboxRarestSpeciesSensor(coordinator, serial),
         ]
     )
 
@@ -40,21 +39,12 @@ class _HaikuboxSensor(CoordinatorEntity[HaikuboxCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
 
-    # These attributes carry the bulk list payloads consumed by the custom
-    # cards (species lists, per-day detections, ranked items). They stay on
-    # the live state object so the frontend can read them, but the recorder
-    # must not persist them on every state change — each can run to dozens
-    # of rows with images/scientific names and would bloat the history DB
-    # and trip HA's state-attribute size warnings.
-    _unrecorded_attributes = frozenset(
-        {
-            "detections",
-            "notable_detections",
-            "species_counts",
-            "recent_first_detections",
-            "items",
-        }
-    )
+    # Every listy sensor exposes its list under `detections`. It stays on
+    # the live state object so the cards can read it, but the recorder must
+    # not persist it on every state change — it can run to dozens of rows
+    # with images/scientific names and would bloat the history DB and trip
+    # HA's state-attribute size warnings.
+    _unrecorded_attributes = frozenset({"detections"})
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator)
@@ -74,7 +64,7 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
     """Number of species detected in the past hour."""
 
     _attr_translation_key = "recent_detections"
-    _attr_icon = "mdi:bird"
+    _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -84,27 +74,27 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("detections", []))
+        return len(self.coordinator.data.get("recent_detections", []))
 
     @property
     def extra_state_attributes(self) -> dict:
         return {
-            "detections": self.coordinator.data.get("detections", []),
+            "detections": self.coordinator.data.get("recent_detections", []),
         }
 
 
-class HaikuboxLastDetectedSensor(_HaikuboxSensor):
+class HaikuboxLastDetectionSensor(_HaikuboxSensor):
     """Name of the most recently detected species."""
 
-    _attr_translation_key = "last_detected"
+    _attr_translation_key = "last_detection"
     _attr_icon = "mdi:bird"
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_last_detected"
+        self._attr_unique_id = f"{serial}_last_detection"
 
     def _latest(self) -> dict | None:
-        return self.coordinator.data.get("last_detected")
+        return self.coordinator.data.get("last_detection")
 
     @property
     def native_value(self) -> str | None:
@@ -130,49 +120,50 @@ class HaikuboxLastDetectedSensor(_HaikuboxSensor):
 
 
 class HaikuboxDailyCountSensor(_HaikuboxSensor):
-    """Total individual detections recorded today."""
+    """Total individual detections over the trailing 24 hours."""
 
     _attr_translation_key = "daily_count"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = "detections"
-    # Accumulates through the day and resets to 0 at midnight.
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # Rolling 24h total: rises and falls as the window slides, so it is a
+    # MEASUREMENT, not a TOTAL_INCREASING counter (which would treat every
+    # decrease as a meter reset and corrupt long-term statistics).
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_daily_count"
 
+    # Pure total counter — the 24h species list lives on daily_top_species.
     @property
     def native_value(self) -> int:
         return sum(
             s.get("count", 0) for s in self.coordinator.data.get("daily_count", [])
         )
 
-    @property
-    def extra_state_attributes(self) -> dict:
-        return {
-            "species_counts": self.coordinator.data.get("daily_count", []),
-        }
 
+class HaikuboxDailyTopSpeciesSensor(_HaikuboxSensor):
+    """Top species by detection count over the trailing 24 hours."""
 
-class HaikuboxDailySpeciesSensor(_HaikuboxSensor):
-    """Number of distinct species heard today."""
-
-    _attr_translation_key = "daily_species"
-    _attr_icon = "mdi:bird"
+    _attr_translation_key = "daily_top_species"
+    _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_daily_species"
+        self._attr_unique_id = f"{serial}_daily_top_species"
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("daily_count", []))
+        return len(self.coordinator.data.get("daily_top_species", []))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"detections": self.coordinator.data.get("daily_top_species", [])}
 
 
-class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
+class HaikuboxNotableSpeciesSensor(_HaikuboxSensor):
     """Most unusual species detected in the recent window.
 
     Rarity is measured against this box's own yearly baseline — a species
@@ -180,15 +171,15 @@ class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
     State persists after the detection window empties.
     """
 
-    _attr_translation_key = "notable_detection"
+    _attr_translation_key = "notable_species"
     _attr_icon = "mdi:bird-off"
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_notable_detection"
+        self._attr_unique_id = f"{serial}_notable_species"
 
     def _top(self) -> dict | None:
-        return self.coordinator.data.get("last_notable")
+        return self.coordinator.data.get("notable_detection")
 
     @property
     def native_value(self) -> str | None:
@@ -204,7 +195,7 @@ class HaikuboxNotableDetectionSensor(_HaikuboxSensor):
     def extra_state_attributes(self) -> dict:
         d = self._top()
         base: dict = {
-            "notable_detections": self.coordinator.data.get("notable_detections", []),
+            "detections": self.coordinator.data.get("notable_detections", []),
         }
         if d:
             base.update({
@@ -234,7 +225,7 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
         self._attr_unique_id = f"{serial}_new_species"
 
     def _latest(self) -> dict | None:
-        return self.coordinator.data.get("last_new_species")
+        return self.coordinator.data.get("new_detection")
 
     @property
     def native_value(self) -> str | None:
@@ -250,19 +241,10 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
     def extra_state_attributes(self) -> dict:
         d = self._latest()
         base: dict = {
-            # Species first detected in the most recent poll only — usually
-            # empty. Named for what it is: the sticky state above is the
-            # headline value, this is the "just discovered" feed.
-            "recent_first_detections": [
-                {
-                    "species": x.get("species"),
-                    "scientific_name": x.get("scientific_name"),
-                    "sp_code": x.get("sp_code"),
-                    "first_seen": x.get("first_seen") or x.get("last_seen"),
-                    "image_url": x.get("image_url"),
-                }
-                for x in self.coordinator.data.get("new_species", [])
-            ],
+            # Species first detected in the most recent poll, ranked by
+            # first-seen recency — usually empty. The sticky state above is
+            # the headline value; this is the "just discovered" feed.
+            "detections": self.coordinator.data.get("new_detections", []),
             "lifetime_species_count": self.coordinator.data.get("lifetime_species_count", 0),
         }
         if d:
@@ -280,64 +262,43 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
         return base
 
 
-class HaikuboxYearlyTopSensor(_HaikuboxSensor):
-    """Top species by detection count for the current calendar year."""
+class HaikuboxYearlyTopSpeciesSensor(_HaikuboxSensor):
+    """Top species by detection count this calendar year."""
 
-    _attr_translation_key = "yearly_top"
+    _attr_translation_key = "yearly_top_species"
     _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_yearly_top"
+        self._attr_unique_id = f"{serial}_yearly_top_species"
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("yearly_top", []))
+        return len(self.coordinator.data.get("yearly_top_species", []))
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"items": self.coordinator.data.get("yearly_top", [])}
+        return {"detections": self.coordinator.data.get("yearly_top_species", [])}
 
 
-class HaikuboxDailyTopSensor(_HaikuboxSensor):
-    """Top species by detection count for today."""
+class HaikuboxRarestSpeciesSensor(_HaikuboxSensor):
+    """Rarest species over the rolling 7-day window (highest rarity score)."""
 
-    _attr_translation_key = "daily_top"
+    _attr_translation_key = "rarest_species"
     _attr_icon = "mdi:chart-bar"
     _attr_native_unit_of_measurement = "species"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_daily_top"
+        self._attr_unique_id = f"{serial}_rarest_species"
 
     @property
     def native_value(self) -> int:
-        return len(self.coordinator.data.get("daily_top", []))
+        return len(self.coordinator.data.get("rarest_species", []))
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"items": self.coordinator.data.get("daily_top", [])}
-
-
-class HaikuboxSevenDayRareSensor(_HaikuboxSensor):
-    """Species with the highest rarity score seen in the rolling 7-day window."""
-
-    _attr_translation_key = "seven_day_rare"
-    _attr_icon = "mdi:star-shooting"
-    _attr_native_unit_of_measurement = "species"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
-        super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_seven_day_rare"
-
-    @property
-    def native_value(self) -> int:
-        return len(self.coordinator.data.get("seven_day_rare", []))
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        return {"items": self.coordinator.data.get("seven_day_rare", [])}
+        return {"detections": self.coordinator.data.get("rarest_species", [])}

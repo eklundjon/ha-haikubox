@@ -33,31 +33,28 @@
   "entity": {
     "sensor": {
       "recent_detections": {
-        "name": "Recent species detected"
+        "name": "Recent detections (1 h)"
       },
-      "last_detected": {
-        "name": "Last detected species"
+      "last_detection": {
+        "name": "Last detection"
       },
       "daily_count": {
-        "name": "Birds detected today"
+        "name": "Total detections (24 h)"
       },
-      "daily_species": {
-        "name": "Species heard today"
+      "daily_top_species": {
+        "name": "Top species (24 h)"
       },
-      "notable_detection": {
-        "name": "Most unusual recent detection"
+      "notable_species": {
+        "name": "Notable species"
       },
       "new_species": {
-        "name": "New species detected"
+        "name": "New species"
       },
-      "yearly_top": {
-        "name": "Top species this year"
+      "yearly_top_species": {
+        "name": "Top species (this calendar year)"
       },
-      "daily_top": {
-        "name": "Top species today"
-      },
-      "seven_day_rare": {
-        "name": "Rarest species (7 days)"
+      "rarest_species": {
+        "name": "Rarest species (7 d)"
       }
     }
   }
