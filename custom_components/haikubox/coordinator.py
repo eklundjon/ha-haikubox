@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
@@ -18,9 +18,9 @@ from .const import (
     CONF_SERIAL,
     DAILY_WINDOW_HOURS,
     DEFAULT_SCAN_INTERVAL,
-    DETECTION_HOURS,
     DOMAIN,
     IMAGES_BASE,
+    RECENT_WINDOW_HOURS,
 )
 from .image_cache import ImageCache
 
@@ -103,12 +103,18 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Could not fetch yearly counts: %s", err)
 
         try:
-            detections_raw = await self._fetch_detections(DETECTION_HOURS)
             daily_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with Haikubox API: {err}") from err
 
-        detections = _normalise_detections(detections_raw)
+        # Single API call: the 24h window is a superset of the 1h window we
+        # used to fetch separately. Derive the recent subset client-side at
+        # the raw level so `count` on recent_detections items reflects
+        # detections-in-last-hour, not detections-in-last-24h.
+        recent_threshold = datetime.now(timezone.utc) - timedelta(hours=RECENT_WINDOW_HOURS)
+        recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
+
+        detections = _normalise_detections(recent_raw)
         _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_total)
 
         # Cache images and rewrite image_url to local path
@@ -459,6 +465,38 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 # ------------------------------------------------------------------
 # Response normalisation
 # ------------------------------------------------------------------
+
+def _filter_by_dt(raw: Any, threshold: datetime) -> list[dict[str, Any]]:
+    """Return raw detection items whose `dt` is at or after the threshold.
+
+    Used to derive the recent-window subset from the single 24h /detections
+    response. Filtering at the raw level (before _normalise_detections sums
+    them) preserves the per-window `count` semantic — a species's `count` on
+    a recent-window record is detections-in-the-last-hour, not
+    detections-in-the-last-24-hours.
+    """
+    if not isinstance(raw, dict):
+        return []
+    items = raw.get("detections", [])
+    if not isinstance(items, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        dt_str = item.get("dt")
+        if not isinstance(dt_str, str) or not dt_str:
+            continue
+        try:
+            dt = datetime.fromisoformat(dt_str)
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if dt >= threshold:
+            out.append(item)
+    return out
+
 
 def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
     """Collapse the flat detections list into one record per species."""
