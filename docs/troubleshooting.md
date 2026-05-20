@@ -10,11 +10,14 @@ The first poll only knows about birds in the current 1-hour window. The longer-r
 - `rarest_species` — needs ≥ 7 days of poll data to compute rarity over its full window; partial results appear sooner.
 - `new_species` — every species the box hears is "new" until your `seen_species` store has recorded it once. Expect the lifetime counter to climb quickly for the first few days, then stabilise.
 
-## `last_detection` / `notable_species` are `unknown` after restart
+## `last_detection` / `notable_species` are `unknown`
 
-Pre-0.4.0, both sticky sensors reset to `unknown` on every HA restart and only recovered when a fresh detection arrived. From 0.4.0 onwards their last value is persisted to `.storage/haikubox.<serial>.sticky` and rehydrated on startup, so they survive restarts (and quiet windows).
+These sticky sensors clear themselves only when there is genuinely nothing to show. From 0.4.0 onwards the integration:
 
-If you're on 0.4.0+ and they're still `unknown` after a restart, it means no detection has been recorded yet on this install — feed the integration a poll's worth of data and they'll populate.
+- Bootstraps both sensors from the 24-hour window on the **first poll**, so a fresh install populates within ~10 minutes as long as your box has detected anything in the last 24 hours.
+- Persists their last value to `.storage/haikubox.<serial>.sticky` and rehydrates on startup, so they survive HA restarts.
+
+If they remain `unknown` after a fresh install with these in place, it usually means the box itself has not heard a recognised species recently — check the Haikubox app to confirm.
 
 ## Custom cards don't appear in the dashboard editor
 
