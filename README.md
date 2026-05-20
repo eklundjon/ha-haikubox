@@ -60,6 +60,8 @@ Full card reference, including the ranked list card and `tap_action` configurati
 | Both custom cards, YAML examples, tap actions, full dashboard example | [docs/cards.md](docs/cards.md) |
 | Custom polling cadence, changing the serial number | [docs/advanced.md](docs/advanced.md) |
 | First-install backfill timing, restart behaviour, card-cache issues, 0.3.x → 0.4.x upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Haikubox API endpoints, polling, image CDN, failure modes | [docs/api.md](docs/api.md) |
+| Module map, data flow, persistence, lifecycle, custom-card registration | [docs/architecture.md](docs/architecture.md) |
 
 ## License
 
