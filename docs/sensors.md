@@ -36,7 +36,9 @@ The `notable_species` and `rarest_species` sensors score each species against yo
 
 ## Persistent state
 
-`last_detection` and `notable_species` never clear between polls and also survive HA restarts (their last value is persisted and rehydrated on startup). The following data is written to `.storage/` and survives HA restarts:
+`last_detection` and `notable_species` never clear between polls. They survive HA restarts (their last value is persisted to `.storage/` and rehydrated on startup), and on a fresh install they bootstrap from the 24-hour detection window on the first poll so they populate immediately rather than waiting for an active hour.
+
+The following data is written to `.storage/` and survives HA restarts:
 
 | Store file | Contents |
 |---|---|

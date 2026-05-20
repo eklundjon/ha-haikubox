@@ -183,6 +183,38 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_total)
 
+        # First-install bootstrap. If a sticky sensor is still empty after
+        # the 1-hour block above (fresh install during a quiet hour, or a
+        # restart with no .sticky store yet), seed it from the 24-hour
+        # window we already have in hand. No extra API call; fires at most
+        # once per sticky sensor over the lifetime of the integration,
+        # since after this the sticky stays populated.
+        if (self._last_detected is None or self._last_notable is None) and daily_count:
+            # Cache images on the seeded record(s) so they carry /local/
+            # URLs, matching the 1-hour pipeline above.
+            for d in daily_count:
+                if d.get("sp_code"):
+                    d["image_url"] = await self._images.async_fetch(d["sp_code"])
+            bootstrap_dirty = False
+            if self._last_detected is None:
+                by_recency = sorted(
+                    daily_count, key=lambda x: x.get("last_seen") or "", reverse=True
+                )
+                if by_recency:
+                    self._last_detected = by_recency[0]
+                    bootstrap_dirty = True
+            if self._last_notable is None:
+                by_rarity = sorted(
+                    daily_count, key=lambda x: x.get("rarity_score", 0), reverse=True
+                )
+                if by_rarity:
+                    self._last_notable = by_rarity[0]
+                    bootstrap_dirty = True
+            if bootstrap_dirty:
+                await self._sticky_store.async_save(
+                    {"last_detected": self._last_detected, "last_notable": self._last_notable}
+                )
+
         # Every list the sensors expose carries a 1-based `rank` reflecting
         # that sensor's own ordering criterion. Each list is sorted by its
         # criterion, then _ranked() stamps the position. (yearly_top_species
