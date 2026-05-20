@@ -189,6 +189,26 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # window we already have in hand. No extra API call; fires at most
         # once per sticky sensor over the lifetime of the integration,
         # since after this the sticky stays populated.
+        #
+        # Also seed the lifetime _seen_species log from the 24h window on
+        # truly-fresh installs (_seen_species empty). Without this seed,
+        # new_species stays "unknown" until an active 1-hour poll arrives —
+        # the same UX gap the sticky bootstrap closes. We use each
+        # detection's own dt timestamp as first_seen; that is accurate for
+        # our observation window (the box's true lifetime first-detection
+        # date is fundamentally inaccessible to us). Existing installs are
+        # untouched: a non-empty store means we already have real
+        # first-seen dates worth preserving.
+        if not self._seen_species and daily_count:
+            seen_seeded = False
+            for d in daily_count:
+                sp = d["species"]
+                if sp and sp not in self._seen_species:
+                    self._seen_species[sp] = d.get("last_seen") or today.isoformat()
+                    seen_seeded = True
+            if seen_seeded:
+                await self._store.async_save(self._seen_species)
+
         if (self._last_detected is None or self._last_notable is None) and daily_count:
             # Cache images on the seeded record(s) so they carry /local/
             # URLs, matching the 1-hour pipeline above.

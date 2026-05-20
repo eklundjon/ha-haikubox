@@ -4,11 +4,12 @@
 
 The first poll only knows about birds in the current 1-hour window. The longer-range sensors fill in as polls accumulate data:
 
-- `recent_detections`, `last_detection`, `notable_species` — populate on the first poll that returns detections (≤ 10 minutes after install).
+- `recent_detections` — populates on the first poll that returns 1-hour detections.
+- `last_detection`, `notable_species`, `new_species` — bootstrap from the 24-hour window on the first poll, so they populate within ~10 minutes of install as long as your box has detected anything in the last 24 hours.
 - `daily_top_species`, `daily_count` — populate within 24 hours as the rolling window fills.
 - `yearly_top_species` — populated by a one-time yearly-baseline fetch on first setup, then refreshed once per calendar day.
 - `rarest_species` — needs ≥ 7 days of poll data to compute rarity over its full window; partial results appear sooner.
-- `new_species` — every species the box hears is "new" until your `seen_species` store has recorded it once. Expect the lifetime counter to climb quickly for the first few days, then stabilise.
+- `lifetime_species_count` starts at the 24-hour bootstrap count and climbs as new species come in. The bootstrap-seeded species use their 24-hour detection timestamp as `first_seen`; truly new species detected later get exact first-seen timestamps.
 
 ## `last_detection` / `notable_species` are `unknown`
 
