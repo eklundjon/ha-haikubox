@@ -109,13 +109,21 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
     @property
     def extra_state_attributes(self) -> dict:
         d = self._latest()
+        # `detections` here is per-event (one record per individual
+        # detection in the trailing 24h, capped at LAST_DETECTION_EVENT_LIMIT),
+        # in contrast to recent_detections.detections which is per-species.
+        # Same attribute name; same field shape per record; different
+        # records-per-X semantic. Always present so cards have a stable
+        # contract even when no sticky record exists yet.
+        events = self.coordinator.data.get("recent_events", [])
         if not d:
-            return {}
+            return {"detections": events}
         return {
             "scientific_name": d.get("scientific_name"),
             "sp_code": d.get("sp_code"),
             "last_seen": d.get("last_seen"),
             "image_url": d.get("image_url"),
+            "detections": events,
         }
 
 
