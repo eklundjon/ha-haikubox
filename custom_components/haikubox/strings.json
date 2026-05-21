@@ -30,6 +30,20 @@
       "reconfigure_successful": "Re-configuration was successful"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Haikubox options",
+        "description": "Tune what counts as “notable.” Higher values favour rare species (stable, low-churn list). Lower values favour recent detections (dynamic, more turnover). Recency is measured over the trailing 24 hours.",
+        "data": {
+          "notable_rarity_weight": "Notability: % weight toward rarity"
+        },
+        "data_description": {
+          "notable_rarity_weight": "100% = pure rarity; 0% = pure recency. Default 70% leans toward rarity with a small recency nudge."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "recent_detections": {

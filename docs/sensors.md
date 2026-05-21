@@ -8,7 +8,7 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 |---|---|---|
 | `sensor.recent_detections` | Species count in current 1-hour window | `detections` (one per species, ranked by recency) |
 | `sensor.last_detection` | Most recently heard species | `last_seen`, `scientific_name`, `image_url`; `detections` (one per event — most recent 50 in 24 h, ranked by recency) |
-| `sensor.notable_species` | Most unusual species in the current window | `detections` (ranked by rarity); `rarity_score`, `yearly_rank` |
+| `sensor.notable_species` | Most "notable" species in the trailing 24 h | `detections` (ranked by notability — tunable blend of rarity and recency); `rarity_score`, `yearly_rank` |
 | `sensor.new_species` | Most recently first-detected species | `detections` (lifetime history — most recent 50 first-seen, ranked by first-seen recency), `lifetime_species_count` |
 | `sensor.daily_count` | Total detections, past 24 h | — (total counter) |
 | `sensor.daily_top_species` | Number of species, past 24 h | `detections` (ranked by 24h count) |
@@ -23,7 +23,7 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 |---|---|---|
 | `recent_detections` | most recently heard | `last_seen` desc |
 | `last_detection` | most recent event | `last_seen` desc |
-| `notable_species` | most unusual | `rarity_score` desc |
+| `notable_species` | most notable | `notability_score` desc (rarity ↔ recency blend) |
 | `new_species` | most recently first-seen | `first_seen` desc |
 | `daily_top_species` | most detected in last 24 h | 24h `count` desc |
 | `yearly_top_species` | most detected this calendar year | yearly `count` |
@@ -45,6 +45,20 @@ Most lists are **live** — recomputed every poll from the current detection win
 ## Rarity scoring
 
 The `notable_species` and `rarest_species` sensors score each species against your box's own yearly history. A species not present in your box's yearly data scores ≈`1.0` (maximally unusual); the most-detected species scores near `0`. So a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
+
+## Notability tuning
+
+`notable_species` blends rarity with recency:
+
+> `notability_score = w · rarity_score + (1 − w) · recency_score`
+
+`recency_score` is a linear decay over the trailing 24 hours — a detection happening right now scores 1.0; one at the 24-hour edge scores 0.0. The blend weight `w` is exposed as a slider in the integration's options (Settings → Integrations → Haikubox → Configure):
+
+- **100% rarity** — pure rarity scoring. The list is dominated by the rarest species in the last day and changes slowly (low churn). Closest to the pre-tuning default.
+- **0% rarity** — pure recency. The top of the list is whatever was heard most recently (high churn).
+- **70% rarity** (default) — mostly rarity-driven but with enough recency influence that a fresh sighting can dethrone an old long-tail entry.
+
+Changes to the slider take effect immediately — the coordinator refreshes the moment you save the options form, no waiting for the next 10-minute poll.
 
 ## Persistent state
 

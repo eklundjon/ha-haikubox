@@ -75,8 +75,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> 
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
+    # Refresh immediately when the user adjusts options (e.g. notability
+    # weight). Without this they'd wait up to 10 minutes for the next
+    # scheduled poll to see the slider take effect. The coordinator reads
+    # the live options dict on each poll, so no other plumbing is needed.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_options_updated(
+    hass: HomeAssistant, entry: HaikuboxConfigEntry
+) -> None:
+    coordinator: HaikuboxCoordinator = entry.runtime_data
+    await coordinator.async_request_refresh()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> bool:
