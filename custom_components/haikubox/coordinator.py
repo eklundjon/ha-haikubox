@@ -21,6 +21,7 @@ from .const import (
     DOMAIN,
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
+    NEW_SPECIES_HISTORY_LIMIT,
     RECENT_WINDOW_HOURS,
 )
 from .image_cache import ImageCache
@@ -160,30 +161,27 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if last_seen_dirty:
             await self._last_seen_store.async_save(self._last_seen)
 
-        new_species: list[dict[str, Any]] = []
         seen_dirty = False
 
-        # Fresh-install bootstrap for _seen_species + new_species list.
-        # Must run BEFORE the recent-window loop below; otherwise that loop
-        # would seed _seen_species from the 1h subset only and species
-        # detected 2-24h ago would silently miss their "new" flagging until
-        # they next appear in a recent window (issue #14).
+        # Fresh-install bootstrap for _seen_species. Must run BEFORE the
+        # recent-window loop below; otherwise that loop would seed
+        # _seen_species from the 1h subset only and species detected 2-24h
+        # ago would silently miss their "new" flagging until they next
+        # appear in a recent window (issue #14).
         #
         # We use each detection's own dt as first_seen — accurate for our
         # observation window (the box's true lifetime first-detection date
-        # is fundamentally inaccessible). Image URLs are cached to /local/
-        # so seeded records match the 1h pipeline's record shape.
+        # is fundamentally inaccessible). Image fetches populate the cache
+        # so _build_new_species_history (which reads via url_for) returns
+        # /local/ URLs for these seeded species.
         if not self._seen_species and daily_count:
             for d in daily_count:
                 sp = d["species"]
                 if not sp:
                     continue
                 if d.get("sp_code"):
-                    d["image_url"] = await self._images.async_fetch(d["sp_code"])
-                first_seen = d.get("last_seen") or today.isoformat()
-                self._seen_species[sp] = first_seen
-                d["first_seen"] = first_seen
-                new_species.append(d)
+                    await self._images.async_fetch(d["sp_code"])
+                self._seen_species[sp] = d.get("last_seen") or today.isoformat()
                 seen_dirty = True
 
         # Track new (never-before-seen) species from the recent window.
@@ -193,10 +191,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for d in detections:
             sp = d["species"]
             if sp not in self._seen_species:
-                first_seen = d.get("last_seen") or today.isoformat()
-                self._seen_species[sp] = first_seen
-                d["first_seen"] = first_seen
-                new_species.append(d)
+                self._seen_species[sp] = d.get("last_seen") or today.isoformat()
                 seen_dirty = True
         if seen_dirty:
             await self._store.async_save(self._seen_species)
@@ -263,11 +258,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # that sensor's own ordering criterion. Each list is sorted by its
         # criterion, then _ranked() stamps the position. (yearly_top_species
         # already carries its yearly rank from _process_yearly_count.)
-        new_by_recency = sorted(
-            new_species,
-            key=lambda d: d.get("first_seen") or d.get("last_seen") or "",
-            reverse=True,
-        )
 
         # Per-event list for last_detection.detections — distinct from the
         # per-species `detections` lists every other sensor exposes (same
@@ -296,7 +286,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "daily_count": daily_count,                      # 24h per-species — total only
             "daily_top_species": _ranked(self._build_daily_list(daily_count)),  # by 24h count
             "notable_detections": _ranked(notable),          # by rarity
-            "new_detections": _ranked(new_by_recency),       # by first-seen recency
+            # Sticky lifetime-history list (N most recently first-seen
+            # species, newest first). Derived from _seen_species, not from
+            # the current poll's new arrivals — populated on a fresh box
+            # as soon as the bootstrap fills _seen_species, and stays
+            # populated forever after.
+            "new_detections": _ranked(self._build_new_species_history()),
             "new_detection": self._build_last_new_species(), # sticky
             "lifetime_species_count": len(self._seen_species),
             "yearly_top_species": self._build_yearly_top(),  # by yearly count (own rank)
@@ -442,27 +437,44 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             })
         return result
 
-    def _build_last_new_species(self) -> dict[str, Any] | None:
-        """The species with the most recent first-detection, enriched.
+    def _build_new_species_history(self) -> list[dict[str, Any]]:
+        """The N most recently first-seen species, sorted by first_seen desc.
 
-        Derived from the persisted seen_species log rather than held in
-        memory, so the value survives HA restarts and stays correct on
-        polls that introduce no new species.
+        Derived from the persisted seen_species log, so the list is sticky
+        across polls and HA restarts. Powers the new_species sensor's
+        `detections` attribute — a "new arrivals" feed rather than a
+        this-poll-only delta. The single sticky `new_detection` record is
+        just the head of this list.
         """
         if not self._seen_species:
-            return None
-        species, first_seen = max(
-            self._seen_species.items(), key=lambda kv: kv[1]
-        )
-        sp_code = self._sp_codes.get(species, "")
-        return {
-            "species": species,
-            "scientific_name": self._sci_names.get(species, ""),
-            "sp_code": sp_code,
-            "first_seen": first_seen,
-            "last_seen": self._last_seen.get(species),
-            "image_url": self._images.url_for(sp_code),
-        }
+            return []
+        sorted_items = sorted(
+            self._seen_species.items(),
+            key=lambda kv: kv[1] or "",
+            reverse=True,
+        )[:NEW_SPECIES_HISTORY_LIMIT]
+        denom = max(self._yearly_total, 1)
+        result: list[dict[str, Any]] = []
+        for species, first_seen in sorted_items:
+            sp_code = self._sp_codes.get(species, "")
+            rank = self._yearly_ranks.get(species, self._yearly_total + 1)
+            result.append({
+                "species": species,
+                "scientific_name": self._sci_names.get(species, ""),
+                "sp_code": sp_code,
+                "image_url": self._images.url_for(sp_code),
+                "last_seen": self._last_seen.get(species),
+                "first_seen": first_seen,
+                "rarity_score": round(rank / denom, 4),
+                "yearly_rank": rank,
+            })
+        return result
+
+    def _build_last_new_species(self) -> dict[str, Any] | None:
+        """The species with the most recent first-detection — head of the
+        new-species history list."""
+        history = self._build_new_species_history()
+        return history[0] if history else None
 
     # ------------------------------------------------------------------
     # Public properties (used by diagnostics)

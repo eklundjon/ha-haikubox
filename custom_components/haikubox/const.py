@@ -29,3 +29,10 @@ DAILY_WINDOW_HOURS = 24
 # 24h payload is the natural ceiling; this is a soft cap for attribute
 # size (~50 × ~250 B ≈ 12 KB, around HA's state-attribute size warning).
 LAST_DETECTION_EVENT_LIMIT = 50
+
+# Cap on the lifetime-history `detections` list exposed on the new_species
+# sensor — the N most recently first-seen species from the seen_species
+# log, sorted by first_seen desc. Sticky like last_detection's per-event
+# list, but per-species (one record per first-seen species, not per event).
+# Same soft attribute-size rationale as LAST_DETECTION_EVENT_LIMIT.
+NEW_SPECIES_HISTORY_LIMIT = 50

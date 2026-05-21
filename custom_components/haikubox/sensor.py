@@ -249,9 +249,10 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
     def extra_state_attributes(self) -> dict:
         d = self._latest()
         base: dict = {
-            # Species first detected in the most recent poll, ranked by
-            # first-seen recency — usually empty. The sticky state above is
-            # the headline value; this is the "just discovered" feed.
+            # Sticky lifetime-history list: the N most recently first-seen
+            # species, newest first. Capped at NEW_SPECIES_HISTORY_LIMIT.
+            # Populated as soon as the box has any species; head of the
+            # list is the sensor's sticky state above.
             "detections": self.coordinator.data.get("new_detections", []),
             "lifetime_species_count": self.coordinator.data.get("lifetime_species_count", 0),
         }
