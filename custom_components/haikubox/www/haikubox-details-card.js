@@ -6,6 +6,20 @@ function _esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+// Editor entity-picker filter: only show Haikubox sensors that expose
+// a `detections` list (so the bird/list cards have something to render).
+// Excludes daily_count, which is a numeric-only total. Returns true
+// (allow) when we can't read the registry, so the picker degrades to
+// "all matching sensors" rather than "no sensors" on older HA.
+function _isHaikuboxListEntity(hass, state) {
+  if (!Array.isArray(state?.attributes?.detections)) return false;
+  const entries = hass?.entities;
+  if (!entries) return true;
+  const entry = entries[state.entity_id];
+  if (!entry) return true;
+  return entry.platform === "haikubox";
+}
+
 // ── Editor ────────────────────────────────────────────────────────────────────
 
 class HaikuboxBirdListCardEditor extends HTMLElement {
@@ -55,13 +69,14 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       entityField.label = "Entity";
       entityField.setAttribute("allow-custom-entity", "");
       entityField.includeDomains = ["sensor"];
+      entityField.entityFilter = (state) => _isHaikuboxListEntity(this._hass, state);
       if (this._hass) entityField.hass = this._hass;
       entityField.value = this._config?.entity ?? "";
       entityField.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
     } else if (customElements.get("ha-selector")) {
       entityField = document.createElement("ha-selector");
       entityField.label = "Entity";
-      entityField.selector = { entity: { domain: ["sensor"] } };
+      entityField.selector = { entity: { domain: ["sensor"], integration: "haikubox" } };
       if (this._hass) entityField.hass = this._hass;
       entityField.value = this._config?.entity ?? "";
       entityField.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
@@ -137,6 +152,27 @@ class HaikuboxBirdListCard extends HTMLElement {
     this._lastUpdated = lastUpdated;
     this._rendered = true;
     this._render();
+  }
+
+  // Lifecycle: a 60s ticker keeps the per-row "last heard" labels honest
+  // between polls. We don't re-render — just rewrite the text content of
+  // each element carrying a data-last-seen attribute, so expansion-panel
+  // animations and image loads stay undisturbed.
+  connectedCallback() {
+    if (this._timeTicker) return;
+    this._timeTicker = setInterval(() => this._updateTimes(), 60_000);
+  }
+  disconnectedCallback() {
+    if (this._timeTicker) {
+      clearInterval(this._timeTicker);
+      this._timeTicker = null;
+    }
+  }
+  _updateTimes() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.querySelectorAll("[data-last-seen]").forEach((el) => {
+      el.textContent = this._relativeTime(el.dataset.lastSeen) ?? "";
+    });
   }
 
   _rank(item, index) {
@@ -370,7 +406,7 @@ class HaikuboxBirdListCard extends HTMLElement {
                         ${item.scientific_name ? `<div class="expansion-sci">${_esc(item.scientific_name)}</div>` : ""}
                         <div class="metrics">
                           ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
-                          ${this._relativeTime(item.last_seen) ? `<div class="metric">last heard <strong>${_esc(this._relativeTime(item.last_seen))}</strong></div>` : ""}
+                          ${this._relativeTime(item.last_seen) ? `<div class="metric">last heard <strong data-last-seen="${_esc(item.last_seen)}">${_esc(this._relativeTime(item.last_seen))}</strong></div>` : ""}
                         </div>
                       </div>
                     </div>
@@ -393,6 +429,21 @@ class HaikuboxBirdListCard extends HTMLElement {
       if (!row) return;
       e.preventDefault();  // Space would otherwise scroll the list
       this._toggleRow(row);
+    });
+
+    // Replace broken images (S3 404, network drop) with the placeholder
+    // glyph so users don't see the browser's broken-image icon. Wired per
+    // <img> via event listener rather than inline onerror to keep the
+    // template clean and CSP-friendly.
+    this.shadowRoot.querySelectorAll(".thumb, .expansion-photo").forEach((img) => {
+      img.addEventListener("error", () => {
+        const placeholder = document.createElement("div");
+        placeholder.className = img.classList.contains("thumb")
+          ? "thumb-placeholder"
+          : "expansion-photo-placeholder";
+        placeholder.textContent = "🐦";
+        img.replaceWith(placeholder);
+      });
     });
   }
 

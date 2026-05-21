@@ -6,6 +6,20 @@ function _esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+// Editor entity-picker filter: only show Haikubox sensors that expose
+// a `detections` list (so the bird/list cards have something to render).
+// Excludes daily_count, which is a numeric-only total. Returns true
+// (allow) when we can't read the registry, so the picker degrades to
+// "all matching sensors" rather than "no sensors" on older HA.
+function _isHaikuboxListEntity(hass, state) {
+  if (!Array.isArray(state?.attributes?.detections)) return false;
+  const entries = hass?.entities;
+  if (!entries) return true;
+  const entry = entries[state.entity_id];
+  if (!entry) return true;
+  return entry.platform === "haikubox";
+}
+
 // ── Editor ────────────────────────────────────────────────────────────────────
 
 class HaikuboxBirdCardEditor extends HTMLElement {
@@ -52,13 +66,14 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       field.label = "Entity";
       field.setAttribute("allow-custom-entity", "");
       field.includeDomains = ["sensor"];
+      field.entityFilter = (state) => _isHaikuboxListEntity(this._hass, state);
       if (this._hass) field.hass = this._hass;
       field.value = this._config?.entity ?? "";
       field.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
     } else if (customElements.get("ha-selector")) {
       field = document.createElement("ha-selector");
       field.label = "Entity";
-      field.selector = { entity: { domain: ["sensor"] } };
+      field.selector = { entity: { domain: ["sensor"], integration: "haikubox" } };
       if (this._hass) field.hass = this._hass;
       field.value = this._config?.entity ?? "";
       field.addEventListener("value-changed", (e) => this._fire({ entity: e.detail.value }));
@@ -134,6 +149,25 @@ class HaikuboxBirdCard extends HTMLElement {
     this._render();
   }
 
+  // Lifecycle: a 60s ticker keeps the "5m ago" label honest between
+  // polls. We don't re-render the whole card on the tick — just rewrite
+  // the .time text node, which avoids image flicker and animation resets.
+  connectedCallback() {
+    if (this._timeTicker) return;  // already running (HA can disconnect/reconnect cards)
+    this._timeTicker = setInterval(() => this._updateTime(), 60_000);
+  }
+  disconnectedCallback() {
+    if (this._timeTicker) {
+      clearInterval(this._timeTicker);
+      this._timeTicker = null;
+    }
+  }
+  _updateTime() {
+    if (!this._lastSeenIso || !this.shadowRoot) return;
+    const el = this.shadowRoot.querySelector(".time");
+    if (el) el.textContent = this._relativeTime(this._lastSeenIso);
+  }
+
   _relativeTime(isoString) {
     if (!isoString) return "";
     // Clamp: a future timestamp (clock skew) must not show "-3s ago".
@@ -195,6 +229,9 @@ class HaikuboxBirdCard extends HTMLElement {
       : null;
     const empty = !bird || !bird.species;
     const actionable = (this._config.tap_action?.action ?? "more-info") !== "none";
+    // Stash for the 60s ticker so it can refresh just the .time element
+    // without a full re-render.
+    this._lastSeenIso = bird?.last_seen ?? null;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -365,6 +402,18 @@ class HaikuboxBirdCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+
+    // If the image fails to load (S3 404, network drop), swap in the
+    // placeholder so users don't see the browser's broken-image glyph.
+    const img = this.shadowRoot.querySelector(".img-wrap img");
+    if (img) {
+      img.addEventListener("error", () => {
+        const placeholder = document.createElement("div");
+        placeholder.className = "img-placeholder";
+        placeholder.textContent = "🐦";
+        img.replaceWith(placeholder);
+      });
+    }
 
     if (actionable) {
       const card = this.shadowRoot.querySelector("ha-card");
