@@ -109,13 +109,21 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
     @property
     def extra_state_attributes(self) -> dict:
         d = self._latest()
+        # `detections` here is per-event (one record per individual
+        # detection in the trailing 24h, capped at LAST_DETECTION_EVENT_LIMIT),
+        # in contrast to recent_detections.detections which is per-species.
+        # Same attribute name; same field shape per record; different
+        # records-per-X semantic. Always present so cards have a stable
+        # contract even when no sticky record exists yet.
+        events = self.coordinator.data.get("recent_events", [])
         if not d:
-            return {}
+            return {"detections": events}
         return {
             "scientific_name": d.get("scientific_name"),
             "sp_code": d.get("sp_code"),
             "last_seen": d.get("last_seen"),
             "image_url": d.get("image_url"),
+            "detections": events,
         }
 
 
@@ -241,9 +249,10 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
     def extra_state_attributes(self) -> dict:
         d = self._latest()
         base: dict = {
-            # Species first detected in the most recent poll, ranked by
-            # first-seen recency — usually empty. The sticky state above is
-            # the headline value; this is the "just discovered" feed.
+            # Sticky lifetime-history list: the N most recently first-seen
+            # species, newest first. Capped at NEW_SPECIES_HISTORY_LIMIT.
+            # Populated as soon as the box has any species; head of the
+            # list is the sensor's sticky state above.
             "detections": self.coordinator.data.get("new_detections", []),
             "lifetime_species_count": self.coordinator.data.get("lifetime_species_count", 0),
         }
