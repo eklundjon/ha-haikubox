@@ -200,8 +200,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if seen_dirty:
             await self._store.async_save(self._seen_species)
 
-        # Update 7-day rolling store with today's detections
-        seven_day_rare = await self._update_seven_day(detections, today)
+        # Update 7-day rolling store with today's detections. Feed in the
+        # 24h-normalised list, not the 1h recent subset, so a species heard
+        # once outside the recent window still refreshes today's bucket on
+        # this poll (issue #15). Within-day dedup by species is handled by
+        # _update_seven_day's today_map; rarity scores are identical on both
+        # lists (both have had _apply_rarity_scores called on them).
+        seven_day_rare = await self._update_seven_day(daily_count, today)
 
         sticky_dirty = False
         if detections:
