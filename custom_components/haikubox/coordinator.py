@@ -15,13 +15,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     API_BASE,
     CONF_DEVICE_NAME,
+    CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
     DAILY_WINDOW_HOURS,
+    DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
     NEW_SPECIES_HISTORY_LIMIT,
+    NOTABILITY_WINDOW_HOURS,
     RECENT_WINDOW_HOURS,
 )
 from .image_cache import ImageCache
@@ -210,7 +213,26 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 sticky_dirty = True
             self._last_detected = detections[0]
 
-        notable = sorted(detections, key=lambda x: x["rarity_score"], reverse=True)
+        # Notability: weighted blend of rarity_score (yearly-rank-derived,
+        # stable across the day) and recency_score (linear decay over a 24h
+        # window). The user controls the blend via a config option; high
+        # weight on rarity → stable list dominated by long-tail species
+        # (close to the historical behaviour); high weight on recency →
+        # dynamic list dominated by what just happened. Computed over the
+        # 24h list (not the 1h subset) so the recency component has real
+        # dynamic range to express.
+        rarity_weight = self.config_entry.options.get(
+            CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
+        ) / 100.0
+        _apply_notability_scores(
+            daily_count,
+            datetime.now(timezone.utc),
+            NOTABILITY_WINDOW_HOURS,
+            rarity_weight,
+        )
+        notable = sorted(
+            daily_count, key=lambda x: x.get("notability_score", 0), reverse=True
+        )
         if notable:
             if not self._last_notable or notable[0].get("species") != self._last_notable.get("species"):
                 sticky_dirty = True
@@ -623,6 +645,44 @@ def _apply_rarity_scores(
         rank = yearly_ranks.get(d["species"], yearly_total + 1)
         d["yearly_rank"] = rank
         d["rarity_score"] = round(rank / denom, 4)
+
+
+def _apply_notability_scores(
+    detections: list[dict[str, Any]],
+    now: datetime,
+    window_hours: int,
+    rarity_weight: float,
+) -> None:
+    """Mutate detection records in-place to add notability_score.
+
+    notability_score = w * rarity_score + (1-w) * recency_score, both in
+    [0, ~1]. recency_score is a linear decay over `window_hours` — newest
+    event scores 1.0, an event at the window edge scores 0.0. A record
+    with no parseable last_seen contributes 0 to recency (only its rarity
+    counts).
+
+    Requires _apply_rarity_scores to have run first so rarity_score is
+    present on every record.
+    """
+    window_seconds = max(window_hours * 3600, 1)
+    recency_weight = 1.0 - rarity_weight
+    for d in detections:
+        rarity = d.get("rarity_score", 0.0) or 0.0
+        recency = 0.0
+        last_seen = d.get("last_seen")
+        if isinstance(last_seen, str) and last_seen:
+            try:
+                dt = datetime.fromisoformat(last_seen)
+            except ValueError:
+                dt = None
+            if dt is not None:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_seconds = max(0.0, (now - dt).total_seconds())
+                recency = max(0.0, 1.0 - age_seconds / window_seconds)
+        d["notability_score"] = round(
+            rarity_weight * rarity + recency_weight * recency, 4
+        )
 
 
 def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -36,3 +36,15 @@ LAST_DETECTION_EVENT_LIMIT = 50
 # list, but per-species (one record per first-seen species, not per event).
 # Same soft attribute-size rationale as LAST_DETECTION_EVENT_LIMIT.
 NEW_SPECIES_HISTORY_LIMIT = 50
+
+# Notable-species tuning. notability_score is a weighted blend of rarity
+# and recency: w * rarity_score + (1-w) * recency_score. The user-facing
+# option is "% weight toward rarity" (0-100); 100 = pure rarity (stable,
+# low churn), 0 = pure recency (dynamic, high churn), default 70 = mostly
+# rarity with a small recency nudge. Recency is a linear decay over
+# NOTABILITY_WINDOW_HOURS — newest event in window scores 1.0, oldest
+# scores 0.0. The window matches the daily 24h window so a slider away
+# from pure rarity has real dynamic range to play with.
+CONF_NOTABLE_RARITY_WEIGHT = "notable_rarity_weight"
+DEFAULT_NOTABLE_RARITY_WEIGHT = 70  # percent
+NOTABILITY_WINDOW_HOURS = 24

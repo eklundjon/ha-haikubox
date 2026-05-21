@@ -5,11 +5,28 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
-from .const import API_BASE, CONF_DEVICE_NAME, CONF_SERIAL, DOMAIN
+from .const import (
+    API_BASE,
+    CONF_DEVICE_NAME,
+    CONF_NOTABLE_RARITY_WEIGHT,
+    CONF_SERIAL,
+    DEFAULT_NOTABLE_RARITY_WEIGHT,
+    DOMAIN,
+)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -34,6 +51,11 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Haikubox."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return HaikuboxOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -88,4 +110,43 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
+        )
+
+
+class HaikuboxOptionsFlow(OptionsFlow):
+    """Per-entry options: notable-species rarity/recency blend.
+
+    No __init__ — HA's flow manager sets `self.config_entry` for us when
+    the flow is created. Assigning it ourselves errors on HA 2024.12+
+    (it became a read-only property), which is now our minimum.
+    """
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options.get(
+            CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_NOTABLE_RARITY_WEIGHT,
+                        default=current,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            step=5,
+                            mode=NumberSelectorMode.SLIDER,
+                            unit_of_measurement="%",
+                        )
+                    ),
+                }
+            ),
         )
