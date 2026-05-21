@@ -27,13 +27,13 @@ The card is fully responsive to both width and height:
 
 The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio. (Requires Home Assistant 2024.11+ for the sections grid sizing API.)
 
-Works with **any** Haikubox sensor: the event/sticky sensors (`last_detection`, `notable_species`, `new_species`) render the bird from their state; the list sensors (`recent_detections`, `daily_top_species`, `yearly_top_species`, `rarest_species`) render their #1 ranked bird from `detections`.
+Works with **any** Haikubox sensor — they all expose a ranked `detections` list, and the card renders `detections[0]` (the #1 ranked record by that sensor's own measure). Empty list → empty card.
 
 ### Tap action
 
 The card uses Home Assistant's standard `tap_action` schema. Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `navigate`, `url`, and `none` (card is inert, the pre-0.4 behaviour).
 
-`navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded from the bound entity's state/attributes. On the event/sticky sensors (`last_detection`/`notable_species`/`new_species`) these match the bird shown; on list sensors the tokens read the entity state/attributes, **not** the displayed #1 item — so use species-specific tap actions with the event sensors:
+`navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded from `detections[0]` (the same record the card displays) — so the action always targets the bird the user is looking at, on any sensor:
 
 ```yaml
 # Open an external page for the bird currently displayed.

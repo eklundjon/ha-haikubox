@@ -108,23 +108,14 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
-        d = self._latest()
-        # `detections` here is per-event (one record per individual
-        # detection in the trailing 24h, capped at LAST_DETECTION_EVENT_LIMIT),
-        # in contrast to recent_detections.detections which is per-species.
+        # `detections` is per-event (one record per individual detection
+        # in the trailing 24h, capped at LAST_DETECTION_EVENT_LIMIT), in
+        # contrast to recent_detections.detections which is per-species.
         # Same attribute name; same field shape per record; different
-        # records-per-X semantic. Always present so cards have a stable
-        # contract even when no sticky record exists yet.
-        events = self.coordinator.data.get("recent_events", [])
-        if not d:
-            return {"detections": events}
-        return {
-            "scientific_name": d.get("scientific_name"),
-            "sp_code": d.get("sp_code"),
-            "last_seen": d.get("last_seen"),
-            "image_url": d.get("image_url"),
-            "detections": events,
-        }
+        # records-per-X semantic. The bird card reads detections[0] for
+        # rich data — no top-level scientific_name/sp_code/last_seen/
+        # image_url duplicates needed.
+        return {"detections": self.coordinator.data.get("recent_events", [])}
 
 
 class HaikuboxDailyCountSensor(_HaikuboxSensor):
@@ -201,20 +192,18 @@ class HaikuboxNotableSpeciesSensor(_HaikuboxSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
+        # rarity_score / yearly_rank are kept as scalars even though they
+        # also live on detections[0] — they're this sensor's signature
+        # metrics for the current top entry and convenient for templates.
+        # All other per-record fields are reachable via detections[0].
         d = self._top()
-        base: dict = {
+        attrs: dict = {
             "detections": self.coordinator.data.get("notable_detections", []),
         }
         if d:
-            base.update({
-                "scientific_name": d.get("scientific_name"),
-                "sp_code": d.get("sp_code"),
-                "last_seen": d.get("last_seen"),
-                "rarity_score": d.get("rarity_score"),
-                "yearly_rank": d.get("yearly_rank"),
-                "image_url": d.get("image_url"),
-            })
-        return base
+            attrs["rarity_score"] = d.get("rarity_score")
+            attrs["yearly_rank"] = d.get("yearly_rank")
+        return attrs
 
 
 class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
@@ -247,28 +236,21 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
+        # `detections` is a sticky lifetime-history list: the N most
+        # recently first-seen species, newest first. Capped at
+        # NEW_SPECIES_HISTORY_LIMIT. Populated as soon as the box has any
+        # species; head of the list is the sensor's sticky state.
+        # lifetime_species_count is a sensor-level scalar (not a list
+        # field); first_seen is the meaningful "discovered on" date for
+        # the current top entry. Everything else lives on detections[0].
         d = self._latest()
-        base: dict = {
-            # Sticky lifetime-history list: the N most recently first-seen
-            # species, newest first. Capped at NEW_SPECIES_HISTORY_LIMIT.
-            # Populated as soon as the box has any species; head of the
-            # list is the sensor's sticky state above.
+        attrs: dict = {
             "detections": self.coordinator.data.get("new_detections", []),
             "lifetime_species_count": self.coordinator.data.get("lifetime_species_count", 0),
         }
         if d:
-            base.update({
-                "scientific_name": d.get("scientific_name"),
-                "sp_code": d.get("sp_code"),
-                # last_seen keeps this sensor's attribute contract aligned
-                # with last_detected / notable_detection so the bird card
-                # always has a timestamp; first_seen is retained because
-                # it is the meaningful date for a *new* species.
-                "last_seen": d.get("last_seen"),
-                "first_seen": d.get("first_seen") or d.get("last_seen"),
-                "image_url": d.get("image_url"),
-            })
-        return base
+            attrs["first_seen"] = d.get("first_seen") or d.get("last_seen")
+        return attrs
 
 
 class HaikuboxYearlyTopSpeciesSensor(_HaikuboxSensor):

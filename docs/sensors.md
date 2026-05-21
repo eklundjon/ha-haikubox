@@ -7,7 +7,7 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | Entity | State | Notable attributes |
 |---|---|---|
 | `sensor.recent_detections` | Species count in current 1-hour window | `detections` (one per species, ranked by recency) |
-| `sensor.last_detection` | Most recently heard species | `last_seen`, `scientific_name`, `image_url`; `detections` (one per event — most recent 50 in 24 h, ranked by recency) |
+| `sensor.last_detection` | Most recently heard species | `detections` (one per event — most recent 50 in 24 h, ranked by recency) |
 | `sensor.notable_species` | Most "notable" species in the trailing 24 h | `detections` (ranked by notability — tunable blend of rarity and recency); `rarity_score`, `yearly_rank` |
 | `sensor.new_species` | Most recently first-detected species | `detections` (lifetime history — most recent 50 first-seen, ranked by first-seen recency), `lifetime_species_count` |
 | `sensor.daily_count` | Total detections, past 24 h | — (total counter) |

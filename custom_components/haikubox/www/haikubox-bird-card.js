@@ -145,18 +145,16 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 
   _fillTokens(str) {
+    // Pull tokens from the same detections[0] record _render shows, so a
+    // tap_action URL like `…/{sp_code}` resolves to the actual bird the
+    // user is looking at (not the sensor's sticky state, which may be
+    // stale relative to the displayed record).
     const stateObj = this._hass?.states[this._config.entity];
-    const species = stateObj?.state ?? "";
     const attrs = stateObj?.attributes ?? {};
+    const top = Array.isArray(attrs.detections) ? attrs.detections[0] : null;
     return String(str).replace(
       /\{(species|sp_code|scientific_name)\}/g,
-      (_, key) => {
-        const value =
-          key === "species" ? species
-          : key === "sp_code" ? (attrs.sp_code ?? "")
-          : (attrs.scientific_name ?? "");
-        return encodeURIComponent(value);
-      },
+      (_, key) => encodeURIComponent(top?.[key] ?? ""),
     );
   }
 
@@ -185,19 +183,16 @@ class HaikuboxBirdCard extends HTMLElement {
   _render() {
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
-    const st = stateObj?.state;
-    // Event sensors carry the bird in the state (a species name). List
-    // sensors carry a ranked `detections` list and a numeric state (a
-    // count) — fall back to detections[0], the top-ranked item by that
-    // sensor's own measure, so the card works pointed at any sensor.
-    const stateIsSpecies =
-      st && !["unknown", "unavailable"].includes(st) && isNaN(Number(st));
+    // Every Haikubox sensor exposes a ranked `detections` list under
+    // each sensor's own ordering criterion. The top entry is the right
+    // thing to show: highest count / rarest / most recent / etc. If the
+    // list is empty (no data in the sensor's window), show empty rather
+    // than substitute stale state — a blank card is honest signal that
+    // something's gone wrong upstream (24h+ silence = likely hardware).
     const top = Array.isArray(attrs.detections) ? attrs.detections[0] : null;
-    const bird = stateIsSpecies
-      ? { species: st, image_url: attrs.image_url, scientific_name: attrs.scientific_name, last_seen: attrs.last_seen }
-      : top
-        ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen }
-        : null;
+    const bird = top
+      ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen }
+      : null;
     const empty = !bird || !bird.species;
     const actionable = (this._config.tap_action?.action ?? "more-info") !== "none";
 
