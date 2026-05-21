@@ -117,6 +117,20 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         detections = _normalise_detections(recent_raw)
         _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_total)
 
+        # "Daily" sensors use a true trailing 24-hour window derived from
+        # /detections (not the server-side calendar-day /daily-count),
+        # ordered by detection count so daily_top_species ranks by 24h volume.
+        # Normalised here (earlier than its downstream uses) so the
+        # fresh-install bootstrap below sees the full 24h species list
+        # before the recent-window new-species loop populates _seen_species
+        # from the 1h subset — the gap that issue #14 surfaced.
+        daily_count = sorted(
+            _normalise_detections(daily_raw),
+            key=lambda x: x.get("count", 0),
+            reverse=True,
+        )
+        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_total)
+
         # Cache images and rewrite image_url to local path
         for d in detections:
             if d.get("sp_code"):
@@ -145,9 +159,36 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if last_seen_dirty:
             await self._last_seen_store.async_save(self._last_seen)
 
-        # Track new (never-before-seen) species
         new_species: list[dict[str, Any]] = []
         seen_dirty = False
+
+        # Fresh-install bootstrap for _seen_species + new_species list.
+        # Must run BEFORE the recent-window loop below; otherwise that loop
+        # would seed _seen_species from the 1h subset only and species
+        # detected 2-24h ago would silently miss their "new" flagging until
+        # they next appear in a recent window (issue #14).
+        #
+        # We use each detection's own dt as first_seen — accurate for our
+        # observation window (the box's true lifetime first-detection date
+        # is fundamentally inaccessible). Image URLs are cached to /local/
+        # so seeded records match the 1h pipeline's record shape.
+        if not self._seen_species and daily_count:
+            for d in daily_count:
+                sp = d["species"]
+                if not sp:
+                    continue
+                if d.get("sp_code"):
+                    d["image_url"] = await self._images.async_fetch(d["sp_code"])
+                first_seen = d.get("last_seen") or today.isoformat()
+                self._seen_species[sp] = first_seen
+                d["first_seen"] = first_seen
+                new_species.append(d)
+                seen_dirty = True
+
+        # Track new (never-before-seen) species from the recent window.
+        # On a fresh install this is a no-op (the bootstrap above already
+        # covered everything in the 24h superset); on established installs
+        # this is the live new-species detector.
         for d in detections:
             sp = d["species"]
             if sp not in self._seen_species:
@@ -179,45 +220,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 {"last_detected": self._last_detected, "last_notable": self._last_notable}
             )
 
-        # "Daily" sensors use a true trailing 24-hour window derived from
-        # /detections (not the server-side calendar-day /daily-count),
-        # ordered by detection count so daily_top_species ranks by 24h volume.
-        daily_count = sorted(
-            _normalise_detections(daily_raw),
-            key=lambda x: x.get("count", 0),
-            reverse=True,
-        )
-        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_total)
-
-        # First-install bootstrap. If a sticky sensor is still empty after
-        # the 1-hour block above (fresh install during a quiet hour, or a
-        # restart with no .sticky store yet), seed it from the 24-hour
-        # window we already have in hand. No extra API call; fires at most
-        # once per sticky sensor over the lifetime of the integration,
-        # since after this the sticky stays populated.
-        #
-        # Also seed the lifetime _seen_species log from the 24h window on
-        # truly-fresh installs (_seen_species empty). Without this seed,
-        # new_species stays "unknown" until an active 1-hour poll arrives —
-        # the same UX gap the sticky bootstrap closes. We use each
-        # detection's own dt timestamp as first_seen; that is accurate for
-        # our observation window (the box's true lifetime first-detection
-        # date is fundamentally inaccessible to us). Existing installs are
-        # untouched: a non-empty store means we already have real
-        # first-seen dates worth preserving.
-        if not self._seen_species and daily_count:
-            seen_seeded = False
-            for d in daily_count:
-                sp = d["species"]
-                if sp and sp not in self._seen_species:
-                    self._seen_species[sp] = d.get("last_seen") or today.isoformat()
-                    seen_seeded = True
-            if seen_seeded:
-                await self._store.async_save(self._seen_species)
-
+        # Sticky-record bootstrap (independent of the _seen_species bootstrap
+        # above). If a sticky sensor is still empty after the recent-window
+        # block — fresh install during a quiet hour, or a restart with no
+        # .sticky store yet — seed it from the 24-hour window we already
+        # have in hand. No extra API call; fires at most once per sticky
+        # sensor over the lifetime of the integration.
         if (self._last_detected is None or self._last_notable is None) and daily_count:
             # Cache images on the seeded record(s) so they carry /local/
-            # URLs, matching the 1-hour pipeline above.
+            # URLs, matching the 1-hour pipeline above. (No-op for records
+            # already cached during the _seen_species bootstrap.)
             for d in daily_count:
                 if d.get("sp_code"):
                     d["image_url"] = await self._images.async_fetch(d["sp_code"])
