@@ -35,11 +35,21 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 
 ### Configure
 
-1. Go to **Settings → Devices & Services → Add Integration**
-2. Search for **Haikubox**
-3. Enter the serial number from the bottom of your device (e.g. `100000003d7c9f2b`)
+**Prerequisite — enable public sharing on your Haikubox.** This integration reads from the public Haikubox API, which only exposes boxes their owner has chosen to share. Sharing is off by default; turn it on once and you're good:
+
+1. Log in to [listen.haikubox.com](https://listen.haikubox.com).
+2. Open the sharing setting and turn on **"Share your haikubox with friends"**.
+3. The site will display your public URL — `https://birds.haikubox.com/listen/<serial>`. Copy the `<serial>` portion (a 16-character hex string like `100000003d7c9f2b`). It's also printed on the bottom of the device if you prefer to read it from there.
+
+**Add the integration in Home Assistant:**
+
+1. Go to **Settings → Devices & Services → Add Integration**.
+2. Search for **Haikubox**.
+3. Paste the serial number.
 
 The integration will verify the serial against the Haikubox API and create a device named after your box (e.g. "Bird Shazam"). Eight sensors appear under that device — see [docs/sensors.md](docs/sensors.md) for the full list.
+
+If setup fails with *"Could not reach the Haikubox API"*, double-check both: the serial is correct, and sharing is enabled. More in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### Add a card
 

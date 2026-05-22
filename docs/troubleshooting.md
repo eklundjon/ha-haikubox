@@ -1,5 +1,22 @@
 # Troubleshooting
 
+## Config flow rejects the serial number with "Could not reach the Haikubox API"
+
+The integration calls `GET https://api.haikubox.com/haikubox/<serial>` to validate your serial during setup. The endpoint returns device info for *publicly shareable* boxes and `Invalid Haikubox.` (HTTP non-200) for everything else — the integration surfaces both kinds of non-200 as the generic *"Could not reach the Haikubox API — check your serial number"* error.
+
+Two common causes:
+
+1. **Wrong serial.** The serial is a 16-character hex string like `100000003d7c9f2b`. It's printed on the bottom of the box, and once sharing is enabled (see below) [listen.haikubox.com](https://listen.haikubox.com) also displays it as part of your public URL — `https://birds.haikubox.com/listen/<serial>`.
+
+2. **Box is private.** By default a Haikubox is **not** shareable — even with the correct serial, the API will reject the lookup. Make it shareable:
+   1. Log into [listen.haikubox.com](https://listen.haikubox.com).
+   2. Turn on the **"Share your haikubox with friends"** setting. Once enabled, the site will start showing your public URL (`https://birds.haikubox.com/listen/<serial>`) — that's both a confirmation the toggle took effect *and* a convenient way to read your serial off the screen.
+   3. Re-run the **Add Integration** flow in Home Assistant.
+
+The integration only reads from the public API, so the sharing setting is required for the integration to function at all.
+
+Don't be confused by the nearby **"Make Private: Hide this Haikubox on the map"** toggle on the same settings page — that controls whether your box shows up on the public birds.haikubox.com map and has **no effect** on API access. You can leave it set either way without breaking this integration. The toggle that matters for HA is **"Share your haikubox with friends"**.
+
 ## Sensors show `0` or `unknown` right after install
 
 Every poll fetches a 24-hour detection window from the Haikubox API, so most sensors populate on poll 1 if your box has any recent activity. A few have a longer fill horizon — here's what to expect:
@@ -29,6 +46,14 @@ If the card picker doesn't list them after install:
 1. Restart Home Assistant once. Card registration runs during integration setup.
 2. Hard-refresh your dashboard (browser reload bypassing cache, e.g. **⇧⌘R** / **Ctrl-F5**). HACS-served JS is cached aggressively.
 3. Check **Settings → System → Logs** for `haikubox` setup errors — if setup failed, the cards never got registered.
+
+## Cards show the placeholder bird (🐦) after upgrading the integration
+
+If an HA dashboard tab was open during an integration upgrade, you may see `haikubox-bird-card` swap from real photos to the 🐦 placeholder for sensors that were rendering normally before. This is one-time post-upgrade behaviour, not a hardware or data issue.
+
+**Why it happens.** Some releases change which attributes a sensor exposes (for example, 0.5.0 moved `image_url` / `scientific_name` / `sp_code` / `last_seen` off the top-level attributes of `last_detection` / `notable_species` / `new_species` and into the per-record `detections` list). The integration version-busts its card JS URL on every release so the browser will fetch the new JS on the next page load — but an *already-open* dashboard tab keeps running the prior version's JS until it reloads. When that older JS reads the attribute layout the upgraded integration is producing, it doesn't find what it expects, and the card's empty-state fallback renders instead of the photo.
+
+**Fix.** Hard-refresh the dashboard once (**⇧⌘R** / **Ctrl-F5**). One-time per browser per major upgrade.
 
 ## Sensor entity IDs don't match the docs
 
