@@ -450,18 +450,22 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if dirty:
             await self._seven_day_store.async_save(self._seven_day_data)
 
-        # Merge across all stored days: per species, keep highest rarity_score
+        # Merge across all stored days: per species, keep highest
+        # rarity_score; tie goes to the newer day (issue #19, item D).
+        # `>=` matches the within-day rule above so tie-breaking is
+        # consistent in both axes — "newest wins" — and a tied newer
+        # record carries its own last_seen forward instead of needing
+        # the old elif-patch to copy the timestamp across.
+        # dict.values() iterates in insertion order; older days were
+        # inserted first (via _load_stores' rehydration order or via
+        # earlier polls), so the later iterations are the newer days.
         merged: dict[str, dict] = {}
         for day_items in self._seven_day_data.values():
             for item in day_items:
                 sp = item["species"]
                 existing = merged.get(sp)
-                if existing is None:
+                if existing is None or item.get("rarity_score", 0) >= existing.get("rarity_score", 0):
                     merged[sp] = dict(item)
-                elif item.get("rarity_score", 0) > existing.get("rarity_score", 0):
-                    merged[sp] = dict(item)
-                elif item.get("last_seen", "") > existing.get("last_seen", ""):
-                    merged[sp] = {**existing, "last_seen": item["last_seen"]}
 
         return sorted(merged.values(), key=lambda x: x.get("rarity_score", 0), reverse=True)
 
