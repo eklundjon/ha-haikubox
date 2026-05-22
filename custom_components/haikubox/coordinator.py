@@ -93,7 +93,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._stores_loaded:
             await self._load_stores()
 
-        today = date.today()
+        # UTC-anchored so that day-boundary semantics (7-day store keys,
+        # once-per-day yearly refresh) align with the API's UTC dt stamps
+        # and behave the same on every host regardless of local timezone
+        # (issue #16).
+        today = datetime.now(timezone.utc).date()
 
         # Refresh yearly baseline once per calendar day
         if self._yearly_fetched_date != today:
@@ -141,7 +145,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if d.get("sp_code"):
                 d["image_url"] = await self._images.async_fetch(d["sp_code"])
 
-        # Update sp_codes, scientific_name, and last_seen lookups from current detections
+        # Update sp_codes, scientific_name, and last_seen lookups. The
+        # dirty flags also accumulate adds from the bootstrap below, so
+        # one save per dict at the end covers both populations.
         sp_codes_dirty = False
         sci_names_dirty = False
         last_seen_dirty = False
@@ -157,12 +163,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if ts and ts > self._last_seen.get(sp, ""):
                 self._last_seen[sp] = ts
                 last_seen_dirty = True
-        if sp_codes_dirty:
-            await self._sp_codes_store.async_save(self._sp_codes)
-        if sci_names_dirty:
-            await self._sci_names_store.async_save(self._sci_names)
-        if last_seen_dirty:
-            await self._last_seen_store.async_save(self._last_seen)
 
         seen_dirty = False
 
@@ -171,6 +171,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # _seen_species from the 1h subset only and species detected 2-24h
         # ago would silently miss their "new" flagging until they next
         # appear in a recent window (issue #14).
+        #
+        # Also fills _sp_codes / _sci_names / _last_seen for those same
+        # 24h-tail species so their records in new_species.detections
+        # have full metadata (image_url, scientific_name, last_seen) on
+        # poll 1 — without this, the detections loop above would only
+        # have populated the lookups for the 1h subset and tail species
+        # would render with the placeholder until they next hit the
+        # recent window (issue #27).
         #
         # We use each detection's own dt as first_seen — accurate for our
         # observation window (the box's true lifetime first-detection date
@@ -184,8 +192,25 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     continue
                 if d.get("sp_code"):
                     await self._images.async_fetch(d["sp_code"])
+                    if sp not in self._sp_codes:
+                        self._sp_codes[sp] = d["sp_code"]
+                        sp_codes_dirty = True
+                if d.get("scientific_name") and sp not in self._sci_names:
+                    self._sci_names[sp] = d["scientific_name"]
+                    sci_names_dirty = True
+                ts = d.get("last_seen")
+                if ts and ts > self._last_seen.get(sp, ""):
+                    self._last_seen[sp] = ts
+                    last_seen_dirty = True
                 self._seen_species[sp] = d.get("last_seen") or today.isoformat()
                 seen_dirty = True
+
+        if sp_codes_dirty:
+            await self._sp_codes_store.async_save(self._sp_codes)
+        if sci_names_dirty:
+            await self._sci_names_store.async_save(self._sci_names)
+        if last_seen_dirty:
+            await self._last_seen_store.async_save(self._last_seen)
 
         # Track new (never-before-seen) species from the recent window.
         # On a fresh install this is a no-op (the bootstrap above already
