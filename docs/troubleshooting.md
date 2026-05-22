@@ -2,14 +2,14 @@
 
 ## Sensors show `0` or `unknown` right after install
 
-The first poll only knows about birds in the current 1-hour window. The longer-range sensors fill in as polls accumulate data:
+Every poll fetches a 24-hour detection window from the Haikubox API, so most sensors populate on poll 1 if your box has any recent activity. A few have a longer fill horizon — here's what to expect:
 
-- `recent_detections` — populates on the first poll that returns 1-hour detections.
-- `last_detection`, `notable_species`, `new_species` — bootstrap from the 24-hour window on the first poll, so they populate within ~10 minutes of install as long as your box has detected anything in the last 24 hours.
-- `daily_top_species`, `daily_count` — populate within 24 hours as the rolling window fills.
-- `yearly_top_species` — populated by a one-time yearly-baseline fetch on first setup, then refreshed once per calendar day.
-- `rarest_species` — needs ≥ 7 days of poll data to compute rarity over its full window; partial results appear sooner.
-- `lifetime_species_count` starts at the 24-hour bootstrap count and climbs as new species come in. The bootstrap-seeded species use their 24-hour detection timestamp as `first_seen`; truly new species detected later get exact first-seen timestamps.
+- `recent_detections` — populates on the first poll that returns any detections in the last hour. Empty between active hours.
+- `last_detection`, `notable_species`, `new_species` — bootstrap from the 24-hour window on the first poll, so they populate within ~10 minutes of install as long as your box has detected anything in the last 24 hours. (They stay sticky thereafter.)
+- `daily_top_species`, `daily_count` — populate on the first poll from the full 24-hour API response. The trailing window slides every poll; counts rise and fall as old detections age past 24h and new ones arrive.
+- `yearly_top_species` — populated by the yearly-baseline fetch on first setup, then refreshed once per calendar day (UTC).
+- `rarest_species` — full 7-day window only after the box has been running for 7 days; before then, the sensor returns whatever the partial window currently contains.
+- `lifetime_species_count` starts at the 24-hour bootstrap count and climbs as new species come in. Bootstrap-seeded species use their **earliest** dt in that first 24-hour window as `first_seen` (not the most recent — the real first observation we can see). Truly new species detected later get exact first-seen timestamps from their actual detection events.
 
 ## `last_detection` / `notable_species` are `unknown`
 

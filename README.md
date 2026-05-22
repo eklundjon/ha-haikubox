@@ -1,7 +1,7 @@
 # Haikubox for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.11+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
+[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.12+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bird audio detection devices. Surfaces recent detections, daily and yearly species counts, and highlights unusual visitors — all with bird photos and custom Lovelace cards.
@@ -10,7 +10,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 
 - **Recent detections** — species heard in the last hour, updated every 10 minutes
 - **Last detection** — persists the most recently heard bird, never goes unknown between detections
-- **Notable species** — most unusual recent bird, ranked by rarity against your box's own yearly baseline
+- **Notable species** — top bird from the trailing 24 hours by a tunable blend of rarity (vs. your box's yearly baseline) and recency; the rarity ↔ recency weight is a slider in the integration's options
 - **New species** — flags species appearing for the first time ever on your box; lifetime log survives restarts
 - **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
 - **Bird details sensors** — top species this calendar year, top species (last 24 h), rarest species (7 d)
