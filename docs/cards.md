@@ -51,14 +51,15 @@ The card uses Home Assistant's standard `tap_action` schema. Supported actions: 
 `navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded from `detections[0]` (the same record the card displays) — so the action always targets the bird the user is looking at, on any sensor:
 
 ```yaml
-# Open an external page for the bird currently displayed.
-# Substitute whatever URL scheme the target site uses; this just
-# shows token substitution.
+# Open the eBird species page for the bird currently displayed.
+# eBird is the same reference catalogue the Haikubox app uses, and
+# its URLs are keyed on the species code that the integration already
+# carries as `sp_code` — no encoding needed.
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_last_detection
 tap_action:
   action: url
-  url_path: https://www.google.com/search?q={scientific_name}+bird
+  url_path: https://ebird.org/species/{sp_code}
 ```
 
 ```yaml
