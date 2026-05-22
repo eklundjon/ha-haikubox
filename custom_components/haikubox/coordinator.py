@@ -55,7 +55,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Yearly counts — refreshed once per calendar day
         self._yearly_ranks: dict[str, int] = {}   # species → rank (1 = most common)
-        self._yearly_total: int = 0
+        self._yearly_species_count: int = 0
         self._yearly_fetched_date: date | None = None
 
         # Sticky records — set on first detection, never cleared; persisted
@@ -103,7 +103,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._yearly_fetched_date != today:
             try:
                 yearly_raw = await self._fetch_yearly_count()
-                self._yearly_ranks, self._yearly_total, self._yearly_items = (
+                self._yearly_ranks, self._yearly_species_count, self._yearly_items = (
                     _process_yearly_count(yearly_raw)
                 )
                 self._yearly_fetched_date = today
@@ -139,7 +139,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
 
         detections = _normalise_detections(recent_raw)
-        _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_total)
+        _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_species_count)
 
         # "Daily" sensors use a true trailing 24-hour window derived from
         # /detections (not the server-side calendar-day /daily-count),
@@ -153,7 +153,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda x: x.get("count", 0),
             reverse=True,
         )
-        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_total)
+        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_species_count)
 
         # Cache images and rewrite image_url to local path
         for d in detections:
@@ -195,12 +195,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # would render with the placeholder until they next hit the
         # recent window (issue #27).
         #
-        # We use each detection's own dt as first_seen — accurate for our
-        # observation window (the box's true lifetime first-detection date
-        # is fundamentally inaccessible). Image fetches populate the cache
-        # so _build_new_species_history (which reads via url_for) returns
-        # /local/ URLs for these seeded species.
+        # We use each species' *earliest* dt in the 24h window as
+        # first_seen — accurate for our observation window (the box's
+        # true lifetime first-detection date is fundamentally
+        # inaccessible). daily_count carries last_seen (the max dt per
+        # species); the actual earliest dt has to come from the raw
+        # payload (issue #19 item F).
+        # Image fetches populate the cache so _build_new_species_history
+        # (which reads via url_for) returns /local/ URLs for seeded species.
         if not self._seen_species and daily_count:
+            first_seen_by_species = _first_seen_per_species(daily_raw)
             for d in daily_count:
                 sp = d["species"]
                 if not sp:
@@ -217,7 +221,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if ts and ts > self._last_seen.get(sp, ""):
                     self._last_seen[sp] = ts
                     last_seen_dirty = True
-                self._seen_species[sp] = d.get("last_seen") or today.isoformat()
+                # Prefer the actual earliest dt; fall back to last_seen
+                # then to today if neither parses (the original behaviour).
+                self._seen_species[sp] = (
+                    first_seen_by_species.get(sp)
+                    or d.get("last_seen")
+                    or today.isoformat()
+                )
                 seen_dirty = True
 
         if sp_codes_dirty:
@@ -329,7 +339,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         recent_events = _build_recent_events(
             daily_raw,
             self._yearly_ranks,
-            self._yearly_total,
+            self._yearly_species_count,
             self._images.url_for,
             LAST_DETECTION_EVENT_LIMIT,
         )
@@ -392,7 +402,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._last_notable = ln
 
         # Rehydrate the rank lookup from the persisted yearly list. Without
-        # this, _yearly_ranks/_yearly_total stay empty after a restart until
+        # this, _yearly_ranks/_yearly_species_count stay empty after a restart until
         # the once-per-day yearly API fetch succeeds — so if that endpoint is
         # down at restart, every species would score rarity 1.0 even though
         # the data needed to score them is sitting in the store.
@@ -401,7 +411,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for item in self._yearly_items
             if isinstance(item, dict) and item.get("species") and item.get("rank")
         }
-        self._yearly_total = len(self._yearly_ranks)
+        self._yearly_species_count = len(self._yearly_ranks)
 
         await self._images.async_init()
 
@@ -421,6 +431,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for item in self._seven_day_data.get(today_str, [])
         }
 
+        # Persisted records intentionally omit image_url — that field is
+        # cache-state-dependent (`/local/...` is only valid while the
+        # JPEG sits in /config/www/haikubox/), so writing a snapshot of
+        # it could leave stale records pointing at deleted files after a
+        # cache wipe. The image URL is re-derived on output via
+        # _images.url_for(sp_code), which falls back to the remote CDN if
+        # the file isn't in the cache (issue #19 item H).
         dirty = False
         for d in detections:
             sp = d["species"]
@@ -433,7 +450,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "rarity_score": d.get("rarity_score", 0.0),
                     "yearly_rank": d.get("yearly_rank", 0),
                     "count": d.get("count", 0),
-                    "image_url": d.get("image_url"),
                     "last_seen": d.get("last_seen"),
                 }
                 dirty = True
@@ -450,20 +466,31 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if dirty:
             await self._seven_day_store.async_save(self._seven_day_data)
 
-        # Merge across all stored days: per species, keep highest rarity_score
+        # Merge across all stored days: per species, keep highest
+        # rarity_score; tie goes to the newer day (issue #19, item D).
+        # `>=` matches the within-day rule above so tie-breaking is
+        # consistent in both axes — "newest wins" — and a tied newer
+        # record carries its own last_seen forward instead of needing
+        # the old elif-patch to copy the timestamp across.
+        # dict.values() iterates in insertion order; older days were
+        # inserted first (via _load_stores' rehydration order or via
+        # earlier polls), so the later iterations are the newer days.
         merged: dict[str, dict] = {}
         for day_items in self._seven_day_data.values():
             for item in day_items:
                 sp = item["species"]
                 existing = merged.get(sp)
-                if existing is None:
+                if existing is None or item.get("rarity_score", 0) >= existing.get("rarity_score", 0):
                     merged[sp] = dict(item)
-                elif item.get("rarity_score", 0) > existing.get("rarity_score", 0):
-                    merged[sp] = dict(item)
-                elif item.get("last_seen", "") > existing.get("last_seen", ""):
-                    merged[sp] = {**existing, "last_seen": item["last_seen"]}
 
-        return sorted(merged.values(), key=lambda x: x.get("rarity_score", 0), reverse=True)
+        # Enrich each record with the current image URL — derived live
+        # via url_for so a wiped or rebuilt cache yields fresh paths
+        # rather than the stale ones that would have been pickled at
+        # write time (issue #19 item H).
+        ordered = sorted(merged.values(), key=lambda x: x.get("rarity_score", 0), reverse=True)
+        for rec in ordered:
+            rec["image_url"] = self._images.url_for(rec.get("sp_code", ""))
+        return ordered
 
     # ------------------------------------------------------------------
     # Dataset builders (store-only, no API calls)
@@ -515,11 +542,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda kv: kv[1] or "",
             reverse=True,
         )[:NEW_SPECIES_HISTORY_LIMIT]
-        denom = max(self._yearly_total, 1)
+        denom = max(self._yearly_species_count, 1)
         result: list[dict[str, Any]] = []
         for species, first_seen in sorted_items:
             sp_code = self._sp_codes.get(species, "")
-            rank = self._yearly_ranks.get(species, self._yearly_total)  # cap at 1.0; see _apply_rarity_scores
+            rank = self._yearly_ranks.get(species, self._yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
                 "scientific_name": self._sci_names.get(species, ""),
@@ -547,8 +574,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._yearly_fetched_date
 
     @property
-    def yearly_total(self) -> int:
-        return self._yearly_total
+    def yearly_species_count(self) -> int:
+        return self._yearly_species_count
 
     @property
     def lifetime_species_count(self) -> int:
@@ -575,6 +602,28 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 # Response normalisation
 # ------------------------------------------------------------------
 
+def _parse_dt(value: Any) -> datetime | None:
+    """Parse an ISO-8601 `dt` string to a UTC-aware datetime.
+
+    Returns None for missing/unparseable input — callers skip such
+    items. Naive datetimes are assumed to be UTC (the API documents
+    UTC; this is a defensive fallback). Centralising parsing here
+    means comparisons elsewhere can be true datetime-vs-datetime
+    rather than the older string-vs-string lexicographic compare,
+    which was fragile to subtle format differences (mixed `+00:00`
+    vs `Z`, missing microseconds, etc. — issue #19 item G).
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _filter_by_dt(raw: Any, threshold: datetime) -> list[dict[str, Any]]:
     """Return raw detection items whose `dt` is at or after the threshold.
 
@@ -593,22 +642,23 @@ def _filter_by_dt(raw: Any, threshold: datetime) -> list[dict[str, Any]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        dt_str = item.get("dt")
-        if not isinstance(dt_str, str) or not dt_str:
+        dt = _parse_dt(item.get("dt"))
+        if dt is None:
             continue
-        try:
-            dt = datetime.fromisoformat(dt_str)
-        except ValueError:
-            continue
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
         if dt >= threshold:
             out.append(item)
     return out
 
 
 def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
-    """Collapse the flat detections list into one record per species."""
+    """Collapse the flat detections list into one record per species.
+
+    `last_seen` comparisons go through _parse_dt and are evaluated on
+    timezone-aware datetimes, not on the raw ISO strings — see #19/G.
+    The string form is what gets stored on the record (downstream code
+    reads strings), but the question of "which dt is later" is answered
+    on parsed datetimes.
+    """
     if not isinstance(raw, dict):
         _LOGGER.debug("Unexpected detections payload type: %s", type(raw))
         return []
@@ -626,7 +676,8 @@ def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
         if sp_code == "soundscape" or item.get("cn", "").lower() == "soundscape":
             continue
         key = sp_code or item.get("cn", "Unknown")
-        dt = item.get("dt")
+        dt_str = item.get("dt")
+        parsed = _parse_dt(dt_str)
 
         if key not in by_species:
             by_species[key] = {
@@ -634,22 +685,69 @@ def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
                 "scientific_name": item.get("sn", ""),
                 "sp_code": sp_code,
                 "image_url": f"{IMAGES_BASE}/{sp_code}.jpeg" if sp_code else None,
-                "last_seen": dt,
+                "last_seen": dt_str,
+                "_last_seen_dt": parsed,
                 "count": 0,
                 "rarity_score": 0.0,
                 "yearly_rank": 0,
             }
         by_species[key]["count"] += 1
-        if dt and (by_species[key]["last_seen"] is None or dt > by_species[key]["last_seen"]):
-            by_species[key]["last_seen"] = dt
+        existing = by_species[key]["_last_seen_dt"]
+        if parsed is not None and (existing is None or parsed > existing):
+            by_species[key]["last_seen"] = dt_str
+            by_species[key]["_last_seen_dt"] = parsed
 
-    return sorted(by_species.values(), key=lambda x: x.get("last_seen") or "", reverse=True)
+    # Strip the internal parsed-dt field; the sort key uses it directly
+    # before we drop it.
+    results = sorted(
+        by_species.values(),
+        key=lambda x: x.get("_last_seen_dt") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    for r in results:
+        r.pop("_last_seen_dt", None)
+    return results
+
+
+def _first_seen_per_species(raw: Any) -> dict[str, str]:
+    """Earliest `dt` (as the original ISO string) per species in the raw
+    payload. Used by the fresh-install bootstrap so seeded species get
+    their actual first-observation timestamp rather than the latest one
+    (issue #19 item F). Soundscape and unparseable-dt items are skipped,
+    matching _normalise_detections' filtering.
+    """
+    out: dict[str, str] = {}
+    best_parsed: dict[str, datetime] = {}
+    if not isinstance(raw, dict):
+        return out
+    items = raw.get("detections", [])
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        sp_code = item.get("spCode", "")
+        if sp_code == "soundscape" or item.get("cn", "").lower() == "soundscape":
+            continue
+        sp = item.get("cn", "Unknown")
+        dt_str = item.get("dt")
+        parsed = _parse_dt(dt_str)
+        if parsed is None:
+            continue
+        existing = best_parsed.get(sp)
+        if existing is None or parsed < existing:
+            best_parsed[sp] = parsed
+            out[sp] = dt_str  # the original string form
+    return out
 
 
 def _process_yearly_count(
     raw: Any,
 ) -> tuple[dict[str, int], int, list[dict[str, Any]]]:
-    """Return (species→rank, total, items_list) from the yearly-count response.
+    """Return (species→rank, species_count, items_list) from the yearly-count
+    response. `species_count` is the number of distinct species in the
+    response (= the denominator used by rarity scoring), not a sum of
+    detection counts.
 
     items_list entries: {"species": str, "count": int, "rank": int}
     """
@@ -677,19 +775,19 @@ def _process_yearly_count(
 def _apply_rarity_scores(
     detections: list[dict[str, Any]],
     yearly_ranks: dict[str, int],
-    yearly_total: int,
+    yearly_species_count: int,
 ) -> None:
     """Mutate detection records in-place to add rarity_score and yearly_rank.
 
-    Species absent from the yearly count fall back to rank=yearly_total,
+    Species absent from the yearly count fall back to rank=yearly_species_count,
     capping rarity_score at 1.0 — tied with the actually-rarest known
     species rather than overshooting it (issue #17). Without the cap,
     unknown species would always rank above ranked-rarest, which is a
     data-availability artifact rather than a genuine rarity signal.
     """
-    denom = max(yearly_total, 1)
+    denom = max(yearly_species_count, 1)
     for d in detections:
-        rank = yearly_ranks.get(d["species"], yearly_total)
+        rank = yearly_ranks.get(d["species"], yearly_species_count)
         d["yearly_rank"] = rank
         d["rarity_score"] = round(rank / denom, 4)
 
@@ -746,7 +844,7 @@ def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _build_recent_events(
     raw: Any,
     yearly_ranks: dict[str, int],
-    yearly_total: int,
+    yearly_species_count: int,
     image_url_for,
     limit: int,
 ) -> list[dict[str, Any]]:
@@ -768,7 +866,7 @@ def _build_recent_events(
     if not isinstance(items, list):
         return []
 
-    denom = max(yearly_total, 1)
+    denom = max(yearly_species_count, 1)
     events: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -780,7 +878,7 @@ def _build_recent_events(
         if not isinstance(dt_str, str) or not dt_str:
             continue
         species = item.get("cn", "Unknown")
-        rank = yearly_ranks.get(species, yearly_total)  # cap at 1.0; see _apply_rarity_scores
+        rank = yearly_ranks.get(species, yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
         # Use `last_seen` for the timestamp field (rather than `dt`) so this
         # list honours the cross-sensor record-shape contract — every other
         # `detections` list exposes `last_seen`, and the bird-list card reads

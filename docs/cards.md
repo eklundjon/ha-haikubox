@@ -48,21 +48,44 @@ A **blank card on `last_detection`** specifically means the box has gone silent 
 
 The card uses Home Assistant's standard `tap_action` schema. Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `navigate`, `url`, and `none` (card is inert, the pre-0.4 behaviour).
 
-`navigation_path` and `url_path` accept `{species}`, `{sp_code}`, and `{scientific_name}` tokens, URL-encoded from `detections[0]` (the same record the card displays) — so the action always targets the bird the user is looking at, on any sensor:
+`navigation_path` and `url_path` accept four tokens, URL-encoded from `detections[0]` (the same record the card displays) — so the action always targets the bird the user is looking at, on any sensor:
+
+| Token | Substituted with | Use case |
+|--|--|--|
+| `{species}` | Common name (e.g. `Downy Woodpecker`) | Generic search or dashboard navigation |
+| `{species_slug}` | Common name with spaces → underscores (e.g. `Downy_Woodpecker`) | URL formats like allaboutbirds.org that key on the slug |
+| `{sp_code}` | Four-letter species code (e.g. `dowwoo`) | eBird-style URL keys |
+| `{scientific_name}` | Latin binomial (e.g. `Picoides pubescens`) | Generic search by scientific name |
+
+Two of the Haikubox app's own external references map cleanly to these tokens:
 
 ```yaml
-# Open an external page for the bird currently displayed.
-# Substitute whatever URL scheme the target site uses; this just
-# shows token substitution.
+# Open the eBird species page for the bird currently displayed.
+# eBird URLs are keyed on the species code we already carry as
+# `sp_code` — one-to-one substitution, no encoding tricks needed.
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_last_detection
 tap_action:
   action: url
-  url_path: https://www.google.com/search?q={scientific_name}+bird
+  url_path: https://ebird.org/species/{sp_code}
 ```
 
 ```yaml
-# Jump to a dashboard view, anchored to the species
+# Open the All About Birds species page for the bird currently
+# displayed. allaboutbirds.org keys URLs on the common name with
+# spaces converted to underscores ("Downy_Woodpecker") — that's
+# exactly what `{species_slug}` produces. Hyphenated names like
+# "White-winged Dove" keep their hyphens.
+type: custom:haikubox-bird-card
+entity: sensor.bird_shazam_last_detection
+tap_action:
+  action: url
+  url_path: https://www.allaboutbirds.org/guide/{species_slug}
+```
+
+Token substitution works for `navigate` actions too — e.g. jumping to a dashboard view anchored to the species name:
+
+```yaml
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_notable_species
 tap_action:
