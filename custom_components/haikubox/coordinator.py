@@ -431,6 +431,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for item in self._seven_day_data.get(today_str, [])
         }
 
+        # Persisted records intentionally omit image_url — that field is
+        # cache-state-dependent (`/local/...` is only valid while the
+        # JPEG sits in /config/www/haikubox/), so writing a snapshot of
+        # it could leave stale records pointing at deleted files after a
+        # cache wipe. The image URL is re-derived on output via
+        # _images.url_for(sp_code), which falls back to the remote CDN if
+        # the file isn't in the cache (issue #19 item H).
         dirty = False
         for d in detections:
             sp = d["species"]
@@ -443,7 +450,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "rarity_score": d.get("rarity_score", 0.0),
                     "yearly_rank": d.get("yearly_rank", 0),
                     "count": d.get("count", 0),
-                    "image_url": d.get("image_url"),
                     "last_seen": d.get("last_seen"),
                 }
                 dirty = True
@@ -477,7 +483,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if existing is None or item.get("rarity_score", 0) >= existing.get("rarity_score", 0):
                     merged[sp] = dict(item)
 
-        return sorted(merged.values(), key=lambda x: x.get("rarity_score", 0), reverse=True)
+        # Enrich each record with the current image URL — derived live
+        # via url_for so a wiped or rebuilt cache yields fresh paths
+        # rather than the stale ones that would have been pickled at
+        # write time (issue #19 item H).
+        ordered = sorted(merged.values(), key=lambda x: x.get("rarity_score", 0), reverse=True)
+        for rec in ordered:
+            rec["image_url"] = self._images.url_for(rec.get("sp_code", ""))
+        return ordered
 
     # ------------------------------------------------------------------
     # Dataset builders (store-only, no API calls)
