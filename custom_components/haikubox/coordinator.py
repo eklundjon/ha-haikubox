@@ -111,6 +111,21 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except aiohttp.ClientError as err:
                 _LOGGER.warning("Could not fetch yearly counts: %s", err)
 
+        # If we still have no yearly baseline, every rarity_score would
+        # collapse to 1.0 and notable_species / rarest_species would lose
+        # their meaning. Fail the update loudly instead of computing
+        # silently-wrong rankings. The only path here is a true fresh
+        # install whose very first /yearly-count fetch failed; any
+        # prior-poll success rehydrates _yearly_ranks from .storage at
+        # load time. HA retries the coordinator's first refresh
+        # automatically, so this self-heals as soon as the API is back
+        # (issue #18).
+        if not self._yearly_ranks:
+            raise UpdateFailed(
+                "Yearly baseline not yet available — /yearly-count fetch failed "
+                "on first poll and there is no cached baseline"
+            )
+
         try:
             daily_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
         except aiohttp.ClientError as err:
