@@ -34,6 +34,12 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
+# Substituted into the user-step description and the cannot_connect error
+# via description_placeholders. Lives in code (not in the translation
+# string) because hassfest's translation validator rejects URLs in
+# translation values — they're meant to be passed in at form-render time.
+_LISTEN_URL = "https://listen.haikubox.com"
+
 
 async def _get_device_info(hass: HomeAssistant, serial: str) -> dict | None:
     """Return the device info dict from the API, or None if the serial is invalid."""
@@ -82,6 +88,7 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
+            description_placeholders={"listen_url": _LISTEN_URL},
         )
 
     async def async_step_reconfigure(
@@ -110,6 +117,10 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
+            # Same placeholder — the reconfigure step doesn't show the
+            # prerequisite in its own description, but a cannot_connect
+            # error rendered here still needs {listen_url} substituted.
+            description_placeholders={"listen_url": _LISTEN_URL},
         )
 
 

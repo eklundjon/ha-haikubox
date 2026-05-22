@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Haikubox Setup",
-        "description": "**Before you start:** your Haikubox must be set to publicly shareable. Sign in at [listen.haikubox.com](https://listen.haikubox.com), turn on **\"Share your haikubox with friends\"**, and copy the serial from the public URL the site displays (`birds.haikubox.com/listen/<serial>`).",
+        "description": "Before you start: your Haikubox must be publicly shareable. Sign in at {listen_url}, turn on the \"Share your haikubox with friends\" setting, and copy the serial from the public URL the site then displays.",
         "data": {
           "serial": "Serial number"
         },
@@ -23,7 +23,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Could not reach the Haikubox API. Check that the serial is correct **and** that you've enabled \"Share your haikubox with friends\" at [listen.haikubox.com](https://listen.haikubox.com)."
+      "cannot_connect": "Could not reach the Haikubox API. Check that the serial is correct and that you've enabled \"Share your haikubox with friends\" at {listen_url}."
     },
     "abort": {
       "already_configured": "This Haikubox is already configured",
