@@ -55,7 +55,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Yearly counts — refreshed once per calendar day
         self._yearly_ranks: dict[str, int] = {}   # species → rank (1 = most common)
-        self._yearly_total: int = 0
+        self._yearly_species_count: int = 0
         self._yearly_fetched_date: date | None = None
 
         # Sticky records — set on first detection, never cleared; persisted
@@ -103,7 +103,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._yearly_fetched_date != today:
             try:
                 yearly_raw = await self._fetch_yearly_count()
-                self._yearly_ranks, self._yearly_total, self._yearly_items = (
+                self._yearly_ranks, self._yearly_species_count, self._yearly_items = (
                     _process_yearly_count(yearly_raw)
                 )
                 self._yearly_fetched_date = today
@@ -139,7 +139,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
 
         detections = _normalise_detections(recent_raw)
-        _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_total)
+        _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_species_count)
 
         # "Daily" sensors use a true trailing 24-hour window derived from
         # /detections (not the server-side calendar-day /daily-count),
@@ -153,7 +153,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda x: x.get("count", 0),
             reverse=True,
         )
-        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_total)
+        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_species_count)
 
         # Cache images and rewrite image_url to local path
         for d in detections:
@@ -329,7 +329,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         recent_events = _build_recent_events(
             daily_raw,
             self._yearly_ranks,
-            self._yearly_total,
+            self._yearly_species_count,
             self._images.url_for,
             LAST_DETECTION_EVENT_LIMIT,
         )
@@ -392,7 +392,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._last_notable = ln
 
         # Rehydrate the rank lookup from the persisted yearly list. Without
-        # this, _yearly_ranks/_yearly_total stay empty after a restart until
+        # this, _yearly_ranks/_yearly_species_count stay empty after a restart until
         # the once-per-day yearly API fetch succeeds — so if that endpoint is
         # down at restart, every species would score rarity 1.0 even though
         # the data needed to score them is sitting in the store.
@@ -401,7 +401,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for item in self._yearly_items
             if isinstance(item, dict) and item.get("species") and item.get("rank")
         }
-        self._yearly_total = len(self._yearly_ranks)
+        self._yearly_species_count = len(self._yearly_ranks)
 
         await self._images.async_init()
 
@@ -515,11 +515,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda kv: kv[1] or "",
             reverse=True,
         )[:NEW_SPECIES_HISTORY_LIMIT]
-        denom = max(self._yearly_total, 1)
+        denom = max(self._yearly_species_count, 1)
         result: list[dict[str, Any]] = []
         for species, first_seen in sorted_items:
             sp_code = self._sp_codes.get(species, "")
-            rank = self._yearly_ranks.get(species, self._yearly_total)  # cap at 1.0; see _apply_rarity_scores
+            rank = self._yearly_ranks.get(species, self._yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
                 "scientific_name": self._sci_names.get(species, ""),
@@ -547,8 +547,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._yearly_fetched_date
 
     @property
-    def yearly_total(self) -> int:
-        return self._yearly_total
+    def yearly_species_count(self) -> int:
+        return self._yearly_species_count
 
     @property
     def lifetime_species_count(self) -> int:
@@ -649,7 +649,10 @@ def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
 def _process_yearly_count(
     raw: Any,
 ) -> tuple[dict[str, int], int, list[dict[str, Any]]]:
-    """Return (species→rank, total, items_list) from the yearly-count response.
+    """Return (species→rank, species_count, items_list) from the yearly-count
+    response. `species_count` is the number of distinct species in the
+    response (= the denominator used by rarity scoring), not a sum of
+    detection counts.
 
     items_list entries: {"species": str, "count": int, "rank": int}
     """
@@ -677,19 +680,19 @@ def _process_yearly_count(
 def _apply_rarity_scores(
     detections: list[dict[str, Any]],
     yearly_ranks: dict[str, int],
-    yearly_total: int,
+    yearly_species_count: int,
 ) -> None:
     """Mutate detection records in-place to add rarity_score and yearly_rank.
 
-    Species absent from the yearly count fall back to rank=yearly_total,
+    Species absent from the yearly count fall back to rank=yearly_species_count,
     capping rarity_score at 1.0 — tied with the actually-rarest known
     species rather than overshooting it (issue #17). Without the cap,
     unknown species would always rank above ranked-rarest, which is a
     data-availability artifact rather than a genuine rarity signal.
     """
-    denom = max(yearly_total, 1)
+    denom = max(yearly_species_count, 1)
     for d in detections:
-        rank = yearly_ranks.get(d["species"], yearly_total)
+        rank = yearly_ranks.get(d["species"], yearly_species_count)
         d["yearly_rank"] = rank
         d["rarity_score"] = round(rank / denom, 4)
 
@@ -746,7 +749,7 @@ def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _build_recent_events(
     raw: Any,
     yearly_ranks: dict[str, int],
-    yearly_total: int,
+    yearly_species_count: int,
     image_url_for,
     limit: int,
 ) -> list[dict[str, Any]]:
@@ -768,7 +771,7 @@ def _build_recent_events(
     if not isinstance(items, list):
         return []
 
-    denom = max(yearly_total, 1)
+    denom = max(yearly_species_count, 1)
     events: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -780,7 +783,7 @@ def _build_recent_events(
         if not isinstance(dt_str, str) or not dt_str:
             continue
         species = item.get("cn", "Unknown")
-        rank = yearly_ranks.get(species, yearly_total)  # cap at 1.0; see _apply_rarity_scores
+        rank = yearly_ranks.get(species, yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
         # Use `last_seen` for the timestamp field (rather than `dt`) so this
         # list honours the cross-sensor record-shape contract — every other
         # `detections` list exposes `last_seen`, and the bird-list card reads

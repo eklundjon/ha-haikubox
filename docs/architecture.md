@@ -161,7 +161,7 @@ Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `da
 | `_sp_codes: dict[str, str]` | `haikubox.<serial>.sp_codes` | `_load_stores` |
 | `_sci_names: dict[str, str]` | `haikubox.<serial>.sci_names` | `_load_stores` |
 | `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_load_stores` |
-| `_yearly_items` + `_yearly_ranks` + `_yearly_total` | `haikubox.<serial>.yearly` | `_load_stores` (ranks rebuilt from list) |
+| `_yearly_items` + `_yearly_ranks` + `_yearly_species_count` | `haikubox.<serial>.yearly` | `_load_stores` (ranks rebuilt from list) |
 | `_seven_day_data: dict[str, list]` | `haikubox.<serial>.seven_day` | `_load_stores` |
 | `_last_detected`, `_last_notable` | `haikubox.<serial>.sticky` | `_load_stores` |
 
