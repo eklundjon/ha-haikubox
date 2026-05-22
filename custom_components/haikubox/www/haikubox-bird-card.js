@@ -105,7 +105,14 @@ class HaikuboxBirdCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("haikubox-bird-card-editor", HaikuboxBirdCardEditor);
+// Idempotent define: if the script gets loaded twice in the same page
+// (cache flap during an HA upgrade, version-bust transient, etc.) a
+// second `define` would throw and abort the script mid-execution,
+// stranding window.customCards in an inconsistent state. The same
+// guard appears around the card itself and customCards.push below.
+if (!customElements.get("haikubox-bird-card-editor")) {
+  customElements.define("haikubox-bird-card-editor", HaikuboxBirdCardEditor);
+}
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 
@@ -205,6 +212,9 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 
   _handleTapAction() {
+    // Defensive: HA usually calls setConfig before any interaction, but
+    // a tap that fires before setConfig completes would otherwise throw.
+    if (!this._config) return;
     const cfg = this._config.tap_action ?? { action: "more-info" };
     const action = cfg.action ?? "more-info";
     if (action === "none") return;
@@ -227,6 +237,11 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 
   _render() {
+    // Defensive: HA's card lifecycle is normally setConfig → set hass
+    // (which calls _render), but during a reload or first-mount edge
+    // case `set hass` can arrive before `setConfig` lands. Bail until
+    // the config exists rather than throwing on `this._config.entity`.
+    if (!this._config) return;
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
     // Every Haikubox sensor exposes a ranked `detections` list under
@@ -453,11 +468,13 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 }
 
-customElements.define("haikubox-bird-card", HaikuboxBirdCard);
+if (!customElements.get("haikubox-bird-card")) {
+  customElements.define("haikubox-bird-card", HaikuboxBirdCard);
 
-window.customCards ??= [];
-window.customCards.push({
-  type: "haikubox-bird-card",
-  name: "Haikubox Bird Card",
-  description: "Displays a Haikubox bird detection with photo, species name, and timestamp.",
-});
+  window.customCards ??= [];
+  window.customCards.push({
+    type: "haikubox-bird-card",
+    name: "Haikubox Bird Card",
+    description: "Displays a Haikubox bird detection with photo, species name, and timestamp.",
+  });
+}
