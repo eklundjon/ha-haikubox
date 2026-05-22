@@ -93,7 +93,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._stores_loaded:
             await self._load_stores()
 
-        today = date.today()
+        # UTC-anchored so that day-boundary semantics (7-day store keys,
+        # once-per-day yearly refresh) align with the API's UTC dt stamps
+        # and behave the same on every host regardless of local timezone
+        # (issue #16).
+        today = datetime.now(timezone.utc).date()
 
         # Refresh yearly baseline once per calendar day
         if self._yearly_fetched_date != today:
