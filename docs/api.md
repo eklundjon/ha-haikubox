@@ -122,7 +122,7 @@ After fetching, `_process_yearly_count` ([coordinator.py:425](../custom_componen
 
 The yearly list is persisted to `.storage/haikubox.<serial>.yearly` so the rank lookup survives HA restarts. If the API is unreachable at restart, the persisted list rehydrates `_yearly_ranks` and `_yearly_total` in [`_load_stores`](../custom_components/haikubox/coordinator.py) — rarity scoring keeps working with stale-but-usable data.
 
-If the API call itself fails inside a poll, the integration logs a warning and proceeds with whatever yearly data it already has. The yearly fetch is the only API call that does **not** raise `UpdateFailed` on error; the detection fetches do, so a connectivity blip surfaces as `unavailable` sensors via HA's normal coordinator handling.
+If the API call fails inside a routine poll and a cached baseline exists (the steady-state case), the integration logs a warning and proceeds with the cached data. If the fetch fails *and* there is no cached baseline — the only realistic path is a true fresh install whose very first `/yearly-count` request errored — the poll raises `UpdateFailed` so sensors are honestly `unavailable` rather than serving rankings computed against an empty baseline. HA retries the coordinator's first refresh automatically; subsequent polls self-heal as soon as the endpoint is reachable.
 
 ## Image CDN
 
@@ -158,8 +158,8 @@ The user can override the cadence through HA's standard "Enable polling for upda
 | Failure | Behaviour |
 |---|---|
 | `/detections` raises `aiohttp.ClientError` | `_async_update_data` raises `UpdateFailed`; HA marks sensors `unavailable` until the next successful poll |
-| `/yearly-count` raises `aiohttp.ClientError` | Warning logged; poll proceeds with the previously-cached yearly baseline |
-| `/yearly-count` not yet cached AND endpoint fails | `_yearly_ranks` empty → every species scores `rarity_score ≈ 1.0` until the endpoint succeeds |
+| `/yearly-count` raises `aiohttp.ClientError`, cached baseline available | Warning logged; poll proceeds with the previously-cached yearly baseline |
+| `/yearly-count` not yet cached AND endpoint fails | `UpdateFailed` raised — sensors `unavailable` until the next poll succeeds. HA retries automatically on a fresh install's first refresh |
 | Image S3 fetch returns non-200 | Card falls back to the remote S3 URL; next poll retries the cache write |
 | Image S3 fetch raises | Same — remote URL returned; failure is logged at DEBUG |
 | `/haikubox/<serial>` (device info) returns non-200 | Config flow surfaces `cannot_connect`; entry is not created |
