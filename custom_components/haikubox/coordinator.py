@@ -504,7 +504,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result: list[dict[str, Any]] = []
         for species, first_seen in sorted_items:
             sp_code = self._sp_codes.get(species, "")
-            rank = self._yearly_ranks.get(species, self._yearly_total + 1)
+            rank = self._yearly_ranks.get(species, self._yearly_total)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
                 "scientific_name": self._sci_names.get(species, ""),
@@ -664,10 +664,17 @@ def _apply_rarity_scores(
     yearly_ranks: dict[str, int],
     yearly_total: int,
 ) -> None:
-    """Mutate detection records in-place to add rarity_score and yearly_rank."""
+    """Mutate detection records in-place to add rarity_score and yearly_rank.
+
+    Species absent from the yearly count fall back to rank=yearly_total,
+    capping rarity_score at 1.0 — tied with the actually-rarest known
+    species rather than overshooting it (issue #17). Without the cap,
+    unknown species would always rank above ranked-rarest, which is a
+    data-availability artifact rather than a genuine rarity signal.
+    """
     denom = max(yearly_total, 1)
     for d in detections:
-        rank = yearly_ranks.get(d["species"], yearly_total + 1)
+        rank = yearly_ranks.get(d["species"], yearly_total)
         d["yearly_rank"] = rank
         d["rarity_score"] = round(rank / denom, 4)
 
@@ -758,7 +765,7 @@ def _build_recent_events(
         if not isinstance(dt_str, str) or not dt_str:
             continue
         species = item.get("cn", "Unknown")
-        rank = yearly_ranks.get(species, yearly_total + 1)
+        rank = yearly_ranks.get(species, yearly_total)  # cap at 1.0; see _apply_rarity_scores
         # Use `last_seen` for the timestamp field (rather than `dt`) so this
         # list honours the cross-sensor record-shape contract — every other
         # `detections` list exposes `last_seen`, and the bird-list card reads
