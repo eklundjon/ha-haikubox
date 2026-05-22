@@ -183,12 +183,24 @@ class HaikuboxBirdCard extends HTMLElement {
     // tap_action URL like `…/{sp_code}` resolves to the actual bird the
     // user is looking at (not the sensor's sticky state, which may be
     // stale relative to the displayed record).
+    //
+    // `{species_slug}` is the common name with spaces converted to
+    // underscores — the slug format used by sites like
+    // allaboutbirds.org. Hyphens (e.g. "White-winged Dove") are
+    // preserved by the transform and by URL encoding.
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
     const top = Array.isArray(attrs.detections) ? attrs.detections[0] : null;
+    const species = String(top?.species ?? "");
+    const fields = {
+      species,
+      species_slug: species.replace(/ /g, "_"),
+      sp_code: top?.sp_code ?? "",
+      scientific_name: top?.scientific_name ?? "",
+    };
     return String(str).replace(
-      /\{(species|sp_code|scientific_name)\}/g,
-      (_, key) => encodeURIComponent(top?.[key] ?? ""),
+      /\{(species|species_slug|sp_code|scientific_name)\}/g,
+      (_, key) => encodeURIComponent(fields[key] ?? ""),
     );
   }
 
