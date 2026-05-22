@@ -118,7 +118,7 @@ if self._yearly_fetched_date != today:
     self._yearly_fetched_date = today
 ```
 
-After fetching, `_process_yearly_count` ([coordinator.py:425](../custom_components/haikubox/coordinator.py)) sorts by count descending and stamps each species with a 1-based `rank`. The resulting `{species → rank}` map is what rarity scoring divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `(yearly_total+1)/yearly_total ≈ 1.0`.
+After fetching, `_process_yearly_count` ([coordinator.py:425](../custom_components/haikubox/coordinator.py)) sorts by count descending and stamps each species with a 1-based `rank`. The resulting `{species → rank}` map is what rarity scoring divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `yearly_total/yearly_total = 1.0` (capped, tied with the rarest known species rather than overshooting it).
 
 The yearly list is persisted to `.storage/haikubox.<serial>.yearly` so the rank lookup survives HA restarts. If the API is unreachable at restart, the persisted list rehydrates `_yearly_ranks` and `_yearly_total` in [`_load_stores`](../custom_components/haikubox/coordinator.py) — rarity scoring keeps working with stale-but-usable data.
 
