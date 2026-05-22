@@ -195,12 +195,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # would render with the placeholder until they next hit the
         # recent window (issue #27).
         #
-        # We use each detection's own dt as first_seen — accurate for our
-        # observation window (the box's true lifetime first-detection date
-        # is fundamentally inaccessible). Image fetches populate the cache
-        # so _build_new_species_history (which reads via url_for) returns
-        # /local/ URLs for these seeded species.
+        # We use each species' *earliest* dt in the 24h window as
+        # first_seen — accurate for our observation window (the box's
+        # true lifetime first-detection date is fundamentally
+        # inaccessible). daily_count carries last_seen (the max dt per
+        # species); the actual earliest dt has to come from the raw
+        # payload (issue #19 item F).
+        # Image fetches populate the cache so _build_new_species_history
+        # (which reads via url_for) returns /local/ URLs for seeded species.
         if not self._seen_species and daily_count:
+            first_seen_by_species = _first_seen_per_species(daily_raw)
             for d in daily_count:
                 sp = d["species"]
                 if not sp:
@@ -217,7 +221,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if ts and ts > self._last_seen.get(sp, ""):
                     self._last_seen[sp] = ts
                     last_seen_dirty = True
-                self._seen_species[sp] = d.get("last_seen") or today.isoformat()
+                # Prefer the actual earliest dt; fall back to last_seen
+                # then to today if neither parses (the original behaviour).
+                self._seen_species[sp] = (
+                    first_seen_by_species.get(sp)
+                    or d.get("last_seen")
+                    or today.isoformat()
+                )
                 seen_dirty = True
 
         if sp_codes_dirty:
@@ -579,6 +589,28 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 # Response normalisation
 # ------------------------------------------------------------------
 
+def _parse_dt(value: Any) -> datetime | None:
+    """Parse an ISO-8601 `dt` string to a UTC-aware datetime.
+
+    Returns None for missing/unparseable input — callers skip such
+    items. Naive datetimes are assumed to be UTC (the API documents
+    UTC; this is a defensive fallback). Centralising parsing here
+    means comparisons elsewhere can be true datetime-vs-datetime
+    rather than the older string-vs-string lexicographic compare,
+    which was fragile to subtle format differences (mixed `+00:00`
+    vs `Z`, missing microseconds, etc. — issue #19 item G).
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _filter_by_dt(raw: Any, threshold: datetime) -> list[dict[str, Any]]:
     """Return raw detection items whose `dt` is at or after the threshold.
 
@@ -597,22 +629,23 @@ def _filter_by_dt(raw: Any, threshold: datetime) -> list[dict[str, Any]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        dt_str = item.get("dt")
-        if not isinstance(dt_str, str) or not dt_str:
+        dt = _parse_dt(item.get("dt"))
+        if dt is None:
             continue
-        try:
-            dt = datetime.fromisoformat(dt_str)
-        except ValueError:
-            continue
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
         if dt >= threshold:
             out.append(item)
     return out
 
 
 def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
-    """Collapse the flat detections list into one record per species."""
+    """Collapse the flat detections list into one record per species.
+
+    `last_seen` comparisons go through _parse_dt and are evaluated on
+    timezone-aware datetimes, not on the raw ISO strings — see #19/G.
+    The string form is what gets stored on the record (downstream code
+    reads strings), but the question of "which dt is later" is answered
+    on parsed datetimes.
+    """
     if not isinstance(raw, dict):
         _LOGGER.debug("Unexpected detections payload type: %s", type(raw))
         return []
@@ -630,7 +663,8 @@ def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
         if sp_code == "soundscape" or item.get("cn", "").lower() == "soundscape":
             continue
         key = sp_code or item.get("cn", "Unknown")
-        dt = item.get("dt")
+        dt_str = item.get("dt")
+        parsed = _parse_dt(dt_str)
 
         if key not in by_species:
             by_species[key] = {
@@ -638,16 +672,60 @@ def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
                 "scientific_name": item.get("sn", ""),
                 "sp_code": sp_code,
                 "image_url": f"{IMAGES_BASE}/{sp_code}.jpeg" if sp_code else None,
-                "last_seen": dt,
+                "last_seen": dt_str,
+                "_last_seen_dt": parsed,
                 "count": 0,
                 "rarity_score": 0.0,
                 "yearly_rank": 0,
             }
         by_species[key]["count"] += 1
-        if dt and (by_species[key]["last_seen"] is None or dt > by_species[key]["last_seen"]):
-            by_species[key]["last_seen"] = dt
+        existing = by_species[key]["_last_seen_dt"]
+        if parsed is not None and (existing is None or parsed > existing):
+            by_species[key]["last_seen"] = dt_str
+            by_species[key]["_last_seen_dt"] = parsed
 
-    return sorted(by_species.values(), key=lambda x: x.get("last_seen") or "", reverse=True)
+    # Strip the internal parsed-dt field; the sort key uses it directly
+    # before we drop it.
+    results = sorted(
+        by_species.values(),
+        key=lambda x: x.get("_last_seen_dt") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    for r in results:
+        r.pop("_last_seen_dt", None)
+    return results
+
+
+def _first_seen_per_species(raw: Any) -> dict[str, str]:
+    """Earliest `dt` (as the original ISO string) per species in the raw
+    payload. Used by the fresh-install bootstrap so seeded species get
+    their actual first-observation timestamp rather than the latest one
+    (issue #19 item F). Soundscape and unparseable-dt items are skipped,
+    matching _normalise_detections' filtering.
+    """
+    out: dict[str, str] = {}
+    best_parsed: dict[str, datetime] = {}
+    if not isinstance(raw, dict):
+        return out
+    items = raw.get("detections", [])
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        sp_code = item.get("spCode", "")
+        if sp_code == "soundscape" or item.get("cn", "").lower() == "soundscape":
+            continue
+        sp = item.get("cn", "Unknown")
+        dt_str = item.get("dt")
+        parsed = _parse_dt(dt_str)
+        if parsed is None:
+            continue
+        existing = best_parsed.get(sp)
+        if existing is None or parsed < existing:
+            best_parsed[sp] = parsed
+            out[sp] = dt_str  # the original string form
+    return out
 
 
 def _process_yearly_count(
