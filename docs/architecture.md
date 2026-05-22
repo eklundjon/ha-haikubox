@@ -247,7 +247,7 @@ The integration's `hacs.json` pins a minimum of **Home Assistant 2024.12**. The 
 
 Two cards live in `www/` and are registered automatically by `async_setup`:
 
-- `haikubox-bird-card` ([www/haikubox-bird-card.js](../custom_components/haikubox/www/haikubox-bird-card.js)) — single-bird tile. Reads `attrs.detections[0]` uniformly for every list-bearing sensor (no state-vs-list bifurcation). Supports HA's standard `tap_action` schema with `{species}`, `{sp_code}`, `{scientific_name}` token substitution; tokens resolve from the same `detections[0]` record the card displays.
+- `haikubox-bird-card` ([www/haikubox-bird-card.js](../custom_components/haikubox/www/haikubox-bird-card.js)) — single-bird tile. Reads `attrs.detections[0]` uniformly for every list-bearing sensor (no state-vs-list bifurcation). Supports HA's standard `tap_action` schema with `{species}`, `{species_slug}` (spaces → underscores, e.g. for allaboutbirds.org-style URLs), `{sp_code}`, and `{scientific_name}` token substitution; tokens resolve from the same `detections[0]` record the card displays.
 - `haikubox-bird-list-card` ([www/haikubox-details-card.js](../custom_components/haikubox/www/haikubox-details-card.js)) — ranked list with tap-to-expand rows. Works with any list-bearing sensor by reading `attrs.detections`.
 
 Both cards read sensor state from HA's frontend WebSocket connection — they have no direct knowledge of the coordinator or the API. Cards are versioned via the `?v=` query string injected by `add_extra_js_url`; on HA restart after an update the browser bypasses its cache and picks up the new JS.
@@ -257,6 +257,8 @@ Both cards read sensor state from HA's frontend WebSocket connection — they ha
 - **Entity picker filter.** Both cards' visual editors pre-filter the entity picker to Haikubox-platform sensors that expose a `detections` list. `daily_count` (numeric-only) is hidden; unrelated integrations don't appear.
 - **Image error fallback.** A broken `<img>` (S3 404, network drop) is swapped for the 🐦 placeholder element so dashboards never show the browser's broken-image glyph.
 - **Live relative-time ticker.** A 60-s `setInterval` wired in `connectedCallback` rewrites just the time-label text content (no full re-render), so labels like "5m ago" stay honest between the 10-min polls without flickering images or interrupting expansion animations.
+- **`setConfig` / `set hass` race guard.** HA's card lifecycle is normally `setConfig` → `set hass`, but during a dashboard reload or first-mount edge case `set hass` can arrive first. `_render` and `_handleTapAction` early-return when `!this._config` instead of throwing on `this._config.entity`, so the next `set hass` after `setConfig` produces a clean render rather than leaving the card stuck in HA's error state ("yellow !").
+- **Idempotent `customElements.define`.** If the integration JS gets loaded twice in the same page (cache flap during an HA upgrade, version-bust transient, etc.), the bottom-of-file `customElements.define(...)` and `customCards.push(...)` are wrapped in a `customElements.get(...)` check. A second load is a complete no-op rather than throwing and aborting mid-script.
 
 ## Design choices worth knowing
 

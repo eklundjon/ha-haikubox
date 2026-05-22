@@ -2,7 +2,7 @@
 
 ## Polling
 
-By default the integration polls the Haikubox API every **10 minutes**, requesting a 1-hour detection window plus a 24-hour window for the rolling 24 h sensors (`daily_count`, `daily_top_species`). The yearly species baseline is refreshed once per calendar day.
+By default the integration polls the Haikubox API every **10 minutes**, making a single 24-hour detections request — the 1-hour recent window used by `recent_detections` and the sticky-sensor live path is derived client-side from that same response. The yearly species baseline is refreshed once per calendar day.
 
 ### Changing the polling cadence
 

@@ -29,7 +29,7 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 | `yearly_top_species` | most detected this calendar year | yearly `count` |
 | `rarest_species` | rarest in last 7 days | `rarity_score` desc |
 
-Any of these can drive the `haikubox-bird-list-card`. `recent_detections` and `notable_species` come straight from the live detection feed (full metadata immediately). `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` fills in as its 7-day window accumulates.
+Any of these can drive the `haikubox-bird-list-card`. `recent_detections` reads the 1-hour subset; `notable_species` reads the full 24-hour window (so its blend has room for the recency component to matter). Both sets of records come straight from the live `/detections` response and carry full metadata immediately. `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` fills in as its 7-day window accumulates.
 
 ### Per-species vs. per-event, live vs. sticky
 
@@ -44,7 +44,7 @@ Most lists are **live** — recomputed every poll from the current detection win
 
 ## Rarity scoring
 
-The `notable_species` and `rarest_species` sensors score each species against your box's own yearly history. A species not present in your box's yearly data scores ≈`1.0` (maximally unusual); the most-detected species scores near `0`. So a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
+The `notable_species` and `rarest_species` sensors score each species against your box's own yearly history. A species not present in your box's yearly data scores `1.0` (capped — tied with the rarest known species rather than overshooting it); the most-detected species scores near `0`. So a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
 
 ## Notability tuning
 

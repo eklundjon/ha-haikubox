@@ -182,7 +182,7 @@ Both cards have a visual editor that the dashboard exposes automatically — the
 
 The entity picker is **pre-filtered to Haikubox sensors that expose a `detections` list** — so the 7 list-bearing sensors are offered, and `daily_count` (numeric-only) is hidden. Unrelated integrations are filtered out entirely.
 
-The single-bird card's editor also includes a **Tap action** picker (more-info / navigate / url / none); URL/navigate paths can use `{species}`, `{sp_code}`, and `{scientific_name}` tokens — see [Tap action](#tap-action) above.
+The single-bird card's editor also includes a **Tap action** picker (more-info / navigate / url / none); URL/navigate paths can use `{species}`, `{species_slug}`, `{sp_code}`, and `{scientific_name}` tokens — see [Tap action](#tap-action) above for the full table and examples.
 
 ---
 
