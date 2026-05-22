@@ -113,7 +113,14 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("haikubox-bird-list-card-editor", HaikuboxBirdListCardEditor);
+// Idempotent define: if the script gets loaded twice in the same page
+// (cache flap during an HA upgrade, version-bust transient, etc.) a
+// second `define` would throw and abort the script mid-execution,
+// stranding window.customCards in an inconsistent state. The same
+// guard appears around the card itself and customCards.push below.
+if (!customElements.get("haikubox-bird-list-card-editor")) {
+  customElements.define("haikubox-bird-list-card-editor", HaikuboxBirdListCardEditor);
+}
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 
@@ -192,6 +199,11 @@ class HaikuboxBirdListCard extends HTMLElement {
   }
 
   _render() {
+    // Defensive: HA's card lifecycle is normally setConfig → set hass
+    // (which calls _render), but during a reload or first-mount edge
+    // case `set hass` can arrive before `setConfig` lands. Bail until
+    // the config exists rather than throwing on `this._config.entity`.
+    if (!this._config) return;
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
     const items = (attrs.detections ?? []).slice(0, this._config.top);
@@ -480,11 +492,13 @@ class HaikuboxBirdListCard extends HTMLElement {
   }
 }
 
-customElements.define("haikubox-bird-list-card", HaikuboxBirdListCard);
+if (!customElements.get("haikubox-bird-list-card")) {
+  customElements.define("haikubox-bird-list-card", HaikuboxBirdListCard);
 
-window.customCards ??= [];
-window.customCards.push({
-  type: "haikubox-bird-list-card",
-  name: "Haikubox Bird List Card",
-  description: "Ranked bird species list — works with yearly, daily, or 7-day rarity sensors.",
-});
+  window.customCards ??= [];
+  window.customCards.push({
+    type: "haikubox-bird-list-card",
+    name: "Haikubox Bird List Card",
+    description: "Ranked bird species list — works with yearly, daily, or 7-day rarity sensors.",
+  });
+}
