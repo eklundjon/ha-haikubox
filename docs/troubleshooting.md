@@ -6,7 +6,7 @@ The integration calls `GET https://api.haikubox.com/haikubox/<serial>` to valida
 
 Two common causes:
 
-1. **Wrong serial.** The serial is a 16-character hex string like `100000003d7c9f2b`. It's printed on the bottom of the box, and once sharing is enabled (see below) [listen.haikubox.com](https://listen.haikubox.com) also displays it as part of your public URL — `https://birds.haikubox.com/listen/<serial>`.
+1. **Wrong serial.** The serial is a hexadecimal code whose length varies by model (e.g. `100000003d7c9f2b`). The reliable place to read it is your public URL, shown once sharing is enabled (see below) — `https://birds.haikubox.com/listen/<serial>`. Some units also have it printed on the base, but newer ones may not.
 
 2. **Box is private.** By default a Haikubox is **not** shareable — even with the correct serial, the API will reject the lookup. Make it shareable:
    1. Log into [listen.haikubox.com](https://listen.haikubox.com).

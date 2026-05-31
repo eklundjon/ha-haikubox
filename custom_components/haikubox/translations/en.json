@@ -8,7 +8,7 @@
           "serial": "Serial number"
         },
         "data_description": {
-          "serial": "16-character hex code (e.g. 100000003d7c9f2b). Also printed on the bottom of the device."
+          "serial": "Hexadecimal code; length varies by model (e.g. 100000003d7c9f2b). Read it from your box's public URL, or its base on units that have a serial sticker."
         }
       },
       "reconfigure": {

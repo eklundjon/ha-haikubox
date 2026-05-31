@@ -39,7 +39,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 
 1. Log in to [listen.haikubox.com](https://listen.haikubox.com).
 2. Open the sharing setting and turn on **"Share your haikubox with friends"**.
-3. The site will display your public URL — `https://birds.haikubox.com/listen/<serial>`. Copy the `<serial>` portion (a 16-character hex string like `100000003d7c9f2b`). It's also printed on the bottom of the device if you prefer to read it from there.
+3. The site will display your public URL — `https://birds.haikubox.com/listen/<serial>`. Copy the `<serial>` portion (a hex code; its length varies by model, e.g. `100000003d7c9f2b`). Some units also have it printed on the base, but newer ones may not — the public URL is the reliable source.
 
 **Add the integration in Home Assistant:**
 
