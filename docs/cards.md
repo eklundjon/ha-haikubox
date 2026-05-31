@@ -29,12 +29,32 @@ The card is fully responsive to both width and height:
 
 - **Portrait** — photo fills the card width up to a square (1:1), text is centred below. When space is tight, the scientific name is dropped and the photo shrinks to maintain at most a 3:2 aspect ratio.
 - **Wide** — when the card is wider than 3:2, the photo moves to the left and text appears on the right.
+- **Text scales with the card.** The species name, scientific name, and timestamp grow as the card grows (via container-query units), so a large card reads at a distance and a small one stays compact. The common name scales most aggressively; sizes are bounded so they never get comically large or unreadably small.
 
 The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio.
 
-Works with any **list-bearing** Haikubox sensor — that's 7 of the 8 (everything except `daily_count`, which is a numeric-only total with no per-species list). The card renders `detections[0]` — the #1 ranked record by that sensor's own measure. Empty list → empty card showing "No recent detections."
+Works with any **list-bearing** Haikubox sensor — that's 7 of the 8 (everything except `daily_count`, which is a numeric-only total with no per-species list). By default the card renders the **top-ranked** record (the #1 entry by that sensor's own measure). Empty list → empty card showing "No recent detections."
 
 The relative timestamp ("5m ago", "2h ago") refreshes every 60 seconds independently of the sensor's poll cadence, so the label stays honest between the 10-minute poll intervals.
+
+### Showing a different rank (`position`)
+
+By default the card shows the top-ranked bird. Set `position` (1-based) to show a different rank — `1` is the top, `2` the second, and so on. This is handy for building a **column of single-bird cards**, each surfacing a different rank from the same sensor:
+
+```yaml
+# Three stacked cards showing the top three of the last 24 hours
+- type: custom:haikubox-bird-card
+  entity: sensor.bird_shazam_daily_top_species
+  position: 1
+- type: custom:haikubox-bird-card
+  entity: sensor.bird_shazam_daily_top_species
+  position: 2
+- type: custom:haikubox-bird-card
+  entity: sensor.bird_shazam_daily_top_species
+  position: 3
+```
+
+If `position` exceeds the number of detections the sensor currently has, the card shows its empty state. `position` is also available as a field in the visual editor.
 
 ### Per-event vs. per-species
 
@@ -46,9 +66,9 @@ A **blank card on `last_detection`** specifically means the box has gone silent 
 
 ### Tap action
 
-The card uses Home Assistant's standard `tap_action` schema. Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `navigate`, `url`, and `none` (card is inert, the pre-0.4 behaviour).
+Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `show-list` (opens a popup of the full species list for this sensor — see below), `navigate`, `url`, and `none` (card is inert).
 
-`navigation_path` and `url_path` accept four tokens, URL-encoded from `detections[0]` (the same record the card displays) — so the action always targets the bird the user is looking at, on any sensor:
+`navigation_path` and `url_path` accept four tokens, URL-encoded from the displayed record (the one selected by `position`) — so the action always targets the bird the user is looking at, on any sensor:
 
 | Token | Substituted with | Use case |
 |--|--|--|
@@ -93,7 +113,18 @@ tap_action:
   navigation_path: /lovelace-birds/species#{species}
 ```
 
-The visual editor exposes a **Tap action** picker; the YAML option works with or without it.
+#### `show-list` — popup the full species list
+
+`action: show-list` opens a modal popup containing the [`haikubox-bird-list-card`](#haikubox-bird-list-card) for the **same sensor** — a quick way to go from a single-bird summary to the full ranked list without leaving the dashboard. The popup has a backdrop and closes on click-outside or **Esc**.
+
+```yaml
+type: custom:haikubox-bird-card
+entity: sensor.bird_shazam_notable_species
+tap_action:
+  action: show-list
+```
+
+The visual editor exposes a **Tap action** dropdown — More info / Show species list / Navigate / Open URL / None — and a path field for the navigate/url cases. (This is a Haikubox-specific picker rather than Home Assistant's standard action selector, because `show-list` is a custom action HA's selector can't list; raw `tap_action` YAML still works either way.)
 
 ---
 
@@ -106,12 +137,41 @@ type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_yearly_top_species
 title: Top Species This Calendar Year   # optional; blank or omitted → entity friendly name
 top: 10                        # max items to render (default: 10)
+row_size: small                # small | medium | large (default: small)
+show_ebird: false              # eBird links in compact view (default: false)
+show_allaboutbirds: false      # All About Birds links in compact view (default: false)
 grid_options:
   columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
 ```
 
-Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table), photo, and scientific name. Tapping a row expands it to a larger photo plus `count×` and a "last heard" timestamp where the sensor provides them.
+Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table), photo, and scientific name. **Tap a row** and it expands in place — the compact row is replaced by a detail view with a larger photo, the scientific name, `count×` and a "last heard" timestamp where the sensor provides them, and reference links (see below). Tap again to collapse. Only one row is open at a time.
+
+### Row size
+
+`row_size` scales the resting (compact) rows — `small` (default, the densest), `medium`, or `large` grow the thumbnail, padding, and text together. It's also a dropdown in the visual editor. Larger sizes trade list density for legibility at a distance; the expanded detail view is the same regardless.
+
+```yaml
+type: custom:haikubox-bird-list-card
+entity: sensor.bird_shazam_daily_top_species
+title: Top Species (24 h)
+row_size: large
+```
+
+### Reference link buttons
+
+Each row can link out to the bird's external species page on eBird and All About Birds (the same two references the Haikubox app uses). eBird keys on the species code the integration already carries; All About Birds keys on the common name. Links open in a new tab and don't toggle the row when clicked.
+
+- **Expanded detail view — always shown.** Tap any row to expand it in place; both reference links appear in the detail view. No configuration needed.
+- **Compact row — opt-in.** `show_ebird` and `show_allaboutbirds` (default `false`, also toggles in the visual editor) add the buttons directly to the always-visible compact row. Handy on a wide card; leave them off on a narrow card to avoid crowding the species name — the links are still one tap away in the detail view.
+
+```yaml
+type: custom:haikubox-bird-list-card
+entity: sensor.bird_shazam_rarest_species
+title: Rarest species (7 d)
+show_ebird: true            # eBird button on the compact row too
+show_allaboutbirds: true    # All About Birds button on the compact row too
+```
 
 Point it at any list-bearing sensor:
 
