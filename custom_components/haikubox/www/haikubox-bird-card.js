@@ -367,7 +367,7 @@ class HaikuboxBirdCard extends HTMLElement {
 
     const listCard = document.createElement("haikubox-bird-list-card");
     try {
-      listCard.setConfig({ entity, top: 50 });
+      listCard.setConfig({ entity, top: 50, row_size: "large" });
     } catch (_) {
       return;
     }
