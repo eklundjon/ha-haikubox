@@ -23,7 +23,7 @@ graph TB
     end
 
     subgraph User-facing
-        Sensors["sensor.py<br/>8 CoordinatorEntity sensors"]
+        Sensors["sensor.py + binary_sensor.py<br/>9 sensors + 1 binary sensor"]
         Cards["www/*.js<br/>bird-card + bird-list-card"]
         Diag["diagnostics.py<br/>redacted bundle"]
     end
@@ -54,13 +54,14 @@ graph TB
 ```text
 custom_components/haikubox/
 ├── __init__.py           # setup + teardown; migration shim; card registration
+├── binary_sensor.py      # detection-problem binary sensor
 ├── config_flow.py        # config flow (initial + reconfigure)
 ├── const.py              # domain, conf keys, API base URLs, intervals
 ├── coordinator.py        # HaikuboxCoordinator + helpers (the brains)
 ├── diagnostics.py        # redacted state dump
 ├── image_cache.py        # ImageCache class
 ├── manifest.json         # HACS manifest (version stamped on release)
-├── sensor.py             # 8 sensor classes
+├── sensor.py             # 9 sensor classes
 ├── strings.json          # translation keys → display names
 ├── translations/
 │   └── en.json
@@ -200,10 +201,10 @@ sequenceDiagram
     Init->>Coord: async_config_entry_first_refresh()
     Coord->>Coord: _load_stores + first poll
     Init->>HA: entry.add_update_listener(_async_options_updated)
-    Init->>HA: forward to sensor platform
+    Init->>HA: forward to sensor + binary_sensor platforms
     HA->>Sensor: async_setup_entry(entry)
     Sensor->>Coord: read coordinator (via runtime_data)
-    Sensor->>HA: add 8 entities
+    Sensor->>HA: add sensor + binary-sensor entities
 
     loop Every 10 minutes
         HA->>Coord: _async_update_data()
@@ -262,7 +263,7 @@ Both cards read sensor state from HA's frontend WebSocket connection — they ha
 
 ## Design choices worth knowing
 
-- **Single coordinator, eight sensors.** All sensors share one `DataUpdateCoordinator`. Updating any one entity refreshes them all — useful for the "custom polling cadence" pattern described in [docs/advanced.md](advanced.md).
+- **Single coordinator, all entities.** Every sensor and the binary sensor share one `DataUpdateCoordinator`. Updating any one entity refreshes them all — useful for the "custom polling cadence" pattern described in [docs/advanced.md](advanced.md). Both new entities read keys the coordinator already produces (`lifetime_species_count`, `daily_count`), so the data-dict contract is unchanged.
 - **`_unrecorded_attributes = {"detections"}`** on every sensor. The `detections` lists can run to 50+ records with images and metadata; persisting them on every state change would bloat the recorder DB and trip HA's state-attribute size warnings. The lists stay on the live state object for cards to read.
 - **Idempotent migration on every setup.** The shim doesn't track "has migration run" — it just checks the registry. Cheap, no version flag to maintain, no chance of getting out of sync.
 - **24-hour bootstrap for sticky sensors.** A fresh install during a quiet hour would otherwise show `last_detection`/`notable_species`/`new_species` as `unknown` indefinitely. The bootstrap seeds them from the 24-hour window we already fetch every poll. The same window also seeds `_seen_species` (lifetime first-seen log) so `new_detections` populates on poll 1 — see [docs/sensors.md](sensors.md) for the user-visible effect.

@@ -52,7 +52,7 @@ sequenceDiagram
     end
 
     Coord->>Store: persist any changed lookup or store
-    Coord-->>Sensors: data dict for 8 sensors
+    Coord-->>Sensors: data dict for all entities
     Sensors->>HA: state and attributes updated
 ```
 

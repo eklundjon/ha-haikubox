@@ -69,6 +69,14 @@
       },
       "rarest_species": {
         "name": "Rarest species (7 d)"
+      },
+      "lifetime_species": {
+        "name": "Lifetime species"
+      }
+    },
+    "binary_sensor": {
+      "extended_silence": {
+        "name": "Extended silence (24 h)"
       }
     }
   }

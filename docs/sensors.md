@@ -2,7 +2,7 @@
 
 All entities are grouped under a single device per Haikubox. Entity IDs are prefixed with your device name (e.g. `sensor.bird_shazam_*`).
 
-## The eight sensors
+## The sensors
 
 | Entity | State | Notable attributes |
 |---|---|---|
@@ -14,6 +14,23 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.daily_top_species` | Number of species, past 24 h | `detections` (ranked by 24h count) |
 | `sensor.yearly_top_species` | Number of species this calendar year | `detections` (ranked by yearly count) |
 | `sensor.rarest_species` | Number of species, rolling 7 d | `detections` (ranked by rarity) |
+| `sensor.lifetime_species` | Distinct species ever detected on this box | — (plain count; `MEASUREMENT` state class for long-term statistics) |
+
+### `sensor.lifetime_species`
+
+A running count of every distinct species the box has ever detected — your "life list." It only ever rises (the lifetime `seen_species` log never shrinks), and it carries a `MEASUREMENT` state class, so Home Assistant's long-term statistics chart it as a curve climbing over weeks and months. The same number is also exposed as the `lifetime_species_count` attribute on `new_species` for templates.
+
+## Binary sensors
+
+| Entity | Device class | On when |
+|---|---|---|
+| `binary_sensor.extended_silence` | `problem` | The box has logged **no** detections in the trailing 24 hours |
+
+### `binary_sensor.extended_silence`
+
+An outdoor Haikubox going a full day with zero recognised detections almost always signals a real problem — the box is offline, unpowered, or its microphone/connection has failed — rather than a genuinely silent day. This `problem` binary sensor turns **on** in that case so you can alert on it directly (e.g. a notification), instead of inferring it from a blank card.
+
+It's derived from the same 24-hour window the `daily_*` sensors use. When a poll fails entirely, the integration goes `unavailable` (see [api.md](api.md#failure-handling)) and this sensor goes unavailable too — "we don't know" rather than a false alarm.
 
 ## The `detections` contract
 

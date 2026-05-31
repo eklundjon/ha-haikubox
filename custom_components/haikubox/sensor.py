@@ -30,6 +30,7 @@ async def async_setup_entry(
             HaikuboxNewSpeciesSensor(coordinator, serial),
             HaikuboxYearlyTopSpeciesSensor(coordinator, serial),
             HaikuboxRarestSpeciesSensor(coordinator, serial),
+            HaikuboxLifetimeSpeciesSensor(coordinator, serial),
         ]
     )
 
@@ -293,3 +294,27 @@ class HaikuboxRarestSpeciesSensor(_HaikuboxSensor):
     @property
     def extra_state_attributes(self) -> dict:
         return {"detections": self.coordinator.data.get("rarest_species", [])}
+
+
+class HaikuboxLifetimeSpeciesSensor(_HaikuboxSensor):
+    """Count of distinct species ever detected on this Haikubox.
+
+    Monotonically rising (the seen_species log only grows), so with a
+    MEASUREMENT state class HA's long-term statistics chart it as a
+    "life list" curve climbing over weeks and months. No `detections`
+    list — this is a plain scalar; the value also appears as the
+    `lifetime_species_count` attribute on `new_species` for templates.
+    """
+
+    _attr_translation_key = "lifetime_species"
+    _attr_icon = "mdi:binoculars"
+    _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_lifetime_species"
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.data.get("lifetime_species_count", 0)

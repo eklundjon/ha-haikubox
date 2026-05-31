@@ -47,7 +47,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 2. Search for **Haikubox**.
 3. Paste the serial number.
 
-The integration will verify the serial against the Haikubox API and create a device named after your box (e.g. "Bird Shazam"). Eight sensors appear under that device — see [docs/sensors.md](docs/sensors.md) for the full list.
+The integration will verify the serial against the Haikubox API and create a device named after your box (e.g. "Bird Shazam"). A set of sensors (plus an "extended silence" binary sensor) appears under that device — see [docs/sensors.md](docs/sensors.md) for the full list.
 
 If setup fails with *"Could not reach the Haikubox API"*, double-check both: the serial is correct, and sharing is enabled. More in [docs/troubleshooting.md](docs/troubleshooting.md).
 

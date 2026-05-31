@@ -13,7 +13,7 @@ from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 _CARDS = [
     ("/haikubox/haikubox-bird-card.js",      "www/haikubox-bird-card.js"),
