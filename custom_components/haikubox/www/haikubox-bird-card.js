@@ -32,7 +32,15 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       this._init();
     } else {
       if (this._picker) this._picker.value = config.entity ?? "";
-      if (this._action) this._action.value = config.tap_action ?? { action: "more-info" };
+      if (this._positionField) this._positionField.value = config.position ?? 1;
+      const ta = config.tap_action ?? { action: "more-info" };
+      this._actionValue = ta.action ?? "more-info";
+      this._pathValue = ta.navigation_path ?? ta.url_path ?? "";
+      if (this._actionField) this._actionField.value = this._actionValue;
+      if (this._pathField) {
+        this._pathField.value = this._pathValue;
+        this._syncPathField();
+      }
     }
   }
 
@@ -43,7 +51,9 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       this._init();
     } else {
       if (this._picker) this._picker.hass = hass;
-      if (this._action) this._action.hass = hass;
+      if (this._positionField) this._positionField.hass = hass;
+      if (this._actionField) this._actionField.hass = hass;
+      if (this._pathField) this._pathField.hass = hass;
     }
   }
 
@@ -53,6 +63,33 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
+  }
+
+  // Show the navigate/url path field only for those actions; relabel it
+  // to match. Other actions (more-info, show-list, none) take no path.
+  _syncPathField() {
+    if (!this._pathField) return;
+    if (this._actionValue === "navigate") {
+      this._pathField.label = "Navigation path";
+      this._pathField.style.display = "block";
+    } else if (this._actionValue === "url") {
+      this._pathField.label = "URL";
+      this._pathField.style.display = "block";
+    } else {
+      this._pathField.style.display = "none";
+    }
+  }
+
+  // Build the tap_action object from our action dropdown + path field and
+  // fire it. navigate/url carry their path under the standard key names
+  // so the card's _handleTapAction (and raw-YAML users) see a normal
+  // tap_action schema.
+  _fireAction() {
+    const action = this._actionValue || "more-info";
+    const ta = { action };
+    if (action === "navigate") ta.navigation_path = this._pathValue || "";
+    else if (action === "url") ta.url_path = this._pathValue || "";
+    this._fire({ tap_action: ta });
   }
 
   async _init() {
@@ -87,20 +124,69 @@ class HaikuboxBirdCardEditor extends HTMLElement {
     this._picker = field;
     this.appendChild(field);
 
-    // Tap action — HA's standard ui-action editor when available; the
-    // YAML tap_action option still works without it.
+    // Position (1-based: 1 = top-ranked). For a column of single-bird
+    // cards each showing a different rank from the same sensor.
+    // Built with ha-selector (not ha-textfield) — ha-textfield isn't
+    // reliably registered in the card-editor context across browsers
+    // and renders invisibly, whereas ha-selector is always available.
+    const pos = document.createElement("ha-selector");
+    pos.label = "Position (1 = top-ranked)";
+    pos.selector = { number: { min: 1, step: 1, mode: "box" } };
+    if (this._hass) pos.hass = this._hass;
+    pos.value = this._config?.position ?? 1;
+    pos.style.cssText = "display:block;padding:0 16px 16px";
+    pos.addEventListener("value-changed", (e) => {
+      const v = parseInt(e.detail.value, 10);
+      this._fire({ position: Number.isFinite(v) && v >= 1 ? v : 1 });
+    });
+    this._positionField = pos;
+    this.appendChild(pos);
+
+    // Tap action — our own picker (not HA's ui_action selector) so we can
+    // offer "Show species list", a custom action HA's selector can't list.
+    // navigate/url still set the standard path keys via _fireAction.
     if (customElements.get("ha-selector")) {
+      const ta = this._config?.tap_action ?? { action: "more-info" };
+      this._actionValue = ta.action ?? "more-info";
+      this._pathValue = ta.navigation_path ?? ta.url_path ?? "";
+
       const action = document.createElement("ha-selector");
       action.label = "Tap action";
       action.selector = {
-        ui_action: { actions: ["more-info", "navigate", "url", "none"] },
+        select: {
+          mode: "dropdown",
+          options: [
+            { value: "more-info", label: "More info" },
+            { value: "show-list", label: "Show species list" },
+            { value: "navigate", label: "Navigate" },
+            { value: "url", label: "Open URL" },
+            { value: "none", label: "None" },
+          ],
+        },
       };
       if (this._hass) action.hass = this._hass;
-      action.value = this._config?.tap_action ?? { action: "more-info" };
-      action.addEventListener("value-changed", (e) => this._fire({ tap_action: e.detail.value }));
+      action.value = this._actionValue;
+      action.addEventListener("value-changed", (e) => {
+        this._actionValue = e.detail.value;
+        this._syncPathField();
+        this._fireAction();
+      });
       action.style.cssText = "display:block;padding:0 16px 16px";
-      this._action = action;
+      this._actionField = action;
       this.appendChild(action);
+
+      const path = document.createElement("ha-selector");
+      path.selector = { text: {} };
+      if (this._hass) path.hass = this._hass;
+      path.value = this._pathValue;
+      path.style.cssText = "display:block;padding:0 16px 16px";
+      path.addEventListener("value-changed", (e) => {
+        this._pathValue = e.detail.value ?? "";
+        this._fireAction();
+      });
+      this._pathField = path;
+      this.appendChild(path);
+      this._syncPathField();
     }
   }
 }
@@ -127,19 +213,33 @@ class HaikuboxBirdCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { entity: "", tap_action: { action: "more-info" } };
+    return { entity: "", tap_action: { action: "more-info" }, position: 1 };
   }
 
   setConfig(config) {
     if (config.entity === undefined) throw new Error("'entity' is required");
+    // `position` is 1-based: 1 = top-ranked bird, 2 = second, etc. Lets a
+    // column of single-bird cards each show a different rank from the same
+    // sensor. Coerced to a positive integer; anything invalid falls to 1.
+    const p = parseInt(config.position, 10);
+    const position = Number.isFinite(p) && p >= 1 ? p : 1;
     // tap_action follows HA's standard schema. Default to more-info
     // (HA's universal default for entity-bound cards); { action: "none" }
     // restores the card's previous inert behaviour.
-    this._config = { tap_action: { action: "more-info" }, ...config };
+    this._config = { tap_action: { action: "more-info" }, ...config, position };
+  }
+
+  // 0-based array index into detections[], derived from the 1-based
+  // `position` config. Used by both _render and _fillTokens so the tap
+  // action targets the same bird the card displays.
+  _index() {
+    return (this._config?.position ?? 1) - 1;
   }
 
   set hass(hass) {
     this._hass = hass;
+    // Keep an open list popup live across polls.
+    if (this._popupListCard && hass) this._popupListCard.hass = hass;
     const stateObj = hass?.states[this._config?.entity];
     // Gate on last_updated, not last_changed: this entity's state is a
     // species name that often stays constant across polls while the
@@ -168,6 +268,8 @@ class HaikuboxBirdCard extends HTMLElement {
       clearInterval(this._timeTicker);
       this._timeTicker = null;
     }
+    // Close a list popup if the card is torn down while it's open.
+    if (this._popupDialog) this._popupDialog.close();
   }
   _updateTime() {
     if (!this._lastSeenIso || !this.shadowRoot) return;
@@ -197,7 +299,7 @@ class HaikuboxBirdCard extends HTMLElement {
     // preserved by the transform and by URL encoding.
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
-    const top = Array.isArray(attrs.detections) ? attrs.detections[0] : null;
+    const top = Array.isArray(attrs.detections) ? attrs.detections[this._index()] : null;
     const species = String(top?.species ?? "");
     const fields = {
       species,
@@ -233,7 +335,62 @@ class HaikuboxBirdCard extends HTMLElement {
     } else if (action === "url") {
       if (!cfg.url_path) return;
       window.open(this._fillTokens(cfg.url_path), "_blank", "noreferrer");
+    } else if (action === "show-list") {
+      this._openListPopup();
     }
+  }
+
+  // Custom action: pop up a modal showing the full ranked species list
+  // for this card's sensor, using the bird-list card. Native <dialog>
+  // gives us a backdrop, focus trap, and ESC-to-close for free; no
+  // external dependency (e.g. browser_mod) required.
+  _openListPopup() {
+    const entity = this._config?.entity;
+    if (!entity || !customElements.get("haikubox-bird-list-card")) return;
+    if (this._popupDialog) return;  // already open
+
+    // One-time backdrop style (document-level; ::backdrop on a body-level
+    // dialog can't be reached from our shadow DOM).
+    if (!document.getElementById("haikubox-list-popup-style")) {
+      const s = document.createElement("style");
+      s.id = "haikubox-list-popup-style";
+      s.textContent = "dialog.haikubox-list-popup::backdrop{background:rgba(0,0,0,0.55);}";
+      document.head.appendChild(s);
+    }
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "haikubox-list-popup";
+    dialog.style.cssText = [
+      "padding:0", "border:none", "background:transparent",
+      "overflow:visible", "color:inherit",
+    ].join(";");
+
+    const listCard = document.createElement("haikubox-bird-list-card");
+    try {
+      listCard.setConfig({ entity, top: 50, row_size: "large" });
+    } catch (_) {
+      return;
+    }
+    // Give the card a concrete box; its internal list scrolls past this.
+    listCard.style.cssText = "display:block;width:min(92vw,560px);height:min(80vh,720px)";
+    if (this._hass) listCard.hass = this._hass;
+
+    dialog.appendChild(listCard);
+    document.body.appendChild(dialog);
+
+    // Backdrop click (target is the dialog itself, outside the card) closes.
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      this._popupDialog = null;
+      this._popupListCard = null;
+      dialog.remove();
+    });
+
+    this._popupDialog = dialog;
+    this._popupListCard = listCard;
+    dialog.showModal();
   }
 
   _render() {
@@ -250,7 +407,8 @@ class HaikuboxBirdCard extends HTMLElement {
     // list is empty (no data in the sensor's window), show empty rather
     // than substitute stale state — a blank card is honest signal that
     // something's gone wrong upstream (24h+ silence = likely hardware).
-    const top = Array.isArray(attrs.detections) ? attrs.detections[0] : null;
+    // `position` (1-based) selects which ranked entry to show.
+    const top = Array.isArray(attrs.detections) ? attrs.detections[this._index()] : null;
     const bird = top
       ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen }
       : null;
@@ -294,9 +452,11 @@ class HaikuboxBirdCard extends HTMLElement {
           flex: 0 0 auto;
           /*
            * Portrait: photo height = card width (square), but not more than
-           * card height minus a minimum text area (72px covers 3 lines).
+           * card height minus a text area. The reserve grows with card
+           * height (clamped 72–160px) so the responsive species text below
+           * has room to grow on large cards instead of being clipped.
            */
-          height: min(100cqw, calc(100cqh - 72px));
+          height: min(100cqw, calc(100cqh - clamp(72px, 26cqh, 160px)));
           width: 100%;
           align-self: center;
           overflow: hidden;
@@ -367,8 +527,8 @@ class HaikuboxBirdCard extends HTMLElement {
         @container (min-aspect-ratio: 1.2) and (max-aspect-ratio: 3/2) {
           .img-wrap {
             flex: 0 0 auto;
-            height: calc(100cqh - 54px);
-            width: min(100cqw, calc((100cqh - 54px) * 1.5));
+            height: calc(100cqh - clamp(54px, 20cqh, 120px));
+            width: min(100cqw, calc((100cqh - clamp(54px, 20cqh, 120px)) * 1.5));
           }
         }
 
@@ -378,18 +538,29 @@ class HaikuboxBirdCard extends HTMLElement {
           align-items: center;
           gap: 3px;
         }
+        /*
+         * Responsive type: sizes scale with the card via container-query
+         * units (cqw/cqh) so the common name reads at a distance on large
+         * cards but stays bounded on small ones. The common name is the
+         * most aggressive; scientific name and timestamp scale gently to
+         * keep the visual hierarchy. clamp(min, preferred, max) — min/max
+         * in rem for predictability, preferred blends width and height.
+         */
         .species {
-          font-size: 1.1em;
+          font-size: clamp(1.1rem, 4cqw + 2.5cqh, 2.8rem);
           font-weight: 600;
+          line-height: 1.1;
+          overflow-wrap: anywhere;
           color: var(--primary-text-color);
         }
         .scientific {
-          font-size: 0.875em;
+          font-size: clamp(0.8rem, 2.4cqw + 1.4cqh, 1.4rem);
           font-style: italic;
+          line-height: 1.15;
           color: var(--secondary-text-color);
         }
         .time {
-          font-size: 0.8em;
+          font-size: clamp(0.75rem, 2cqw + 1.1cqh, 1.15rem);
           color: var(--secondary-text-color);
         }
 
