@@ -34,14 +34,22 @@
     "step": {
       "init": {
         "title": "Haikubox options",
-        "description": "Tune what counts as “notable.” Higher values favour rare species (stable, low-churn list). Lower values favour recent detections (dynamic, more turnover). Recency is measured over the trailing 24 hours.",
+        "description": "Tune the “notable species” ranking and the unusual-visitor alert.",
         "data": {
-          "notable_rarity_weight": "Notability: % weight toward rarity"
+          "notable_rarity_weight": "Notability: % weight toward rarity",
+          "absence_days": "Unusual visitor: days unheard"
         },
         "data_description": {
-          "notable_rarity_weight": "100% = pure rarity; 0% = pure recency. Default 70% leans toward rarity with a small recency nudge."
+          "notable_rarity_weight": "100% = pure rarity; 0% = pure recency. Default 70% leans toward rarity with a small recency nudge.",
+          "absence_days": "How long a known species must have gone unheard before it counts as an unusual visitor (the unusual_visitor automation trigger). Default 30 days."
         }
       }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "new_species": "New species detected",
+      "unusual_visitor": "Unusual visitor detected"
     }
   },
   "entity": {

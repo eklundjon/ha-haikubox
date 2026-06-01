@@ -8,24 +8,30 @@ import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     API_BASE,
+    CONF_ABSENCE_DAYS,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
     DAILY_WINDOW_HOURS,
+    DEFAULT_ABSENCE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    EVENT_HAIKUBOX,
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
     NEW_SPECIES_HISTORY_LIMIT,
     NOTABILITY_WINDOW_HOURS,
     RECENT_WINDOW_HOURS,
+    TRIGGER_NEW_SPECIES,
+    TRIGGER_UNUSUAL_VISITOR,
 )
 from .image_cache import ImageCache
 
@@ -81,6 +87,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._yearly_items: list[dict[str, Any]] = []    # [{species, count, rank}]
         self._seven_day_data: dict[str, list] = {}       # date_str → [species records]
         self._stores_loaded: bool = False
+
+        # Automation-event edge detection. Species present in the recent
+        # window on the previous poll — used to fire unusual_visitor only on
+        # a species's (re)appearance, not every poll while it lingers. None
+        # until the first poll of the session establishes the baseline; that
+        # first poll fires no unusual_visitor events (avoids a restart flood).
+        self._prev_recent_species: set[str] | None = None
 
         # Species photo cache (downloads once, serves from /local/)
         self._images = ImageCache(hass, self._session)
@@ -159,6 +172,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for d in detections:
             if d.get("sp_code"):
                 d["image_url"] = await self._images.async_fetch(d["sp_code"])
+
+        # Snapshot last_seen before the update loop overwrites it, so the
+        # unusual_visitor event can measure each species' absence gap against
+        # when we *previously* heard it (not this poll's timestamp).
+        prior_last_seen = dict(self._last_seen)
 
         # Update sp_codes, scientific_name, and last_seen lookups. The
         # dirty flags also accumulate adds from the bootstrap below, so
@@ -240,11 +258,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Track new (never-before-seen) species from the recent window.
         # On a fresh install this is a no-op (the bootstrap above already
         # covered everything in the 24h superset); on established installs
-        # this is the live new-species detector.
+        # this is the live new-species detector. `newly_seen` drives the
+        # new_species automation event — naturally silent on fresh install
+        # since the bootstrap pre-seeded _seen_species.
+        newly_seen: set[str] = set()
         for d in detections:
             sp = d["species"]
             if sp not in self._seen_species:
                 self._seen_species[sp] = d.get("last_seen") or today.isoformat()
+                newly_seen.add(sp)
                 seen_dirty = True
         if seen_dirty:
             await self._store.async_save(self._seen_species)
@@ -344,6 +366,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             LAST_DETECTION_EVENT_LIMIT,
         )
 
+        # Fire automation events (new_species / unusual_visitor) for this
+        # poll's qualifying species, then advance the recent-window baseline.
+        self._fire_detection_events(detections, newly_seen, prior_last_seen)
+
         return {
             # key == sensor id; the public list attribute is always
             # `detections`. Singular keys are sticky single records;
@@ -369,6 +395,86 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "yearly_top_species": self._build_yearly_top(),  # by yearly count (own rank)
             "rarest_species": _ranked(seven_day_rare),       # by rarity
         }
+
+    # ------------------------------------------------------------------
+    # Automation events
+    # ------------------------------------------------------------------
+
+    def _fire_detection_events(
+        self,
+        detections: list[dict[str, Any]],
+        newly_seen: set[str],
+        prior_last_seen: dict[str, str],
+    ) -> None:
+        """Fire new_species / unusual_visitor bus events for this poll.
+
+        `detections` is the recent (1h) per-species list with rarity and
+        image metadata; `newly_seen` are species first recorded this poll
+        (the live new-species detector, empty on a fresh-install bootstrap);
+        `prior_last_seen` is the last-seen map as it was *before* this poll's
+        update — used to measure each species' absence gap.
+        """
+        by_species = {d["species"]: d for d in detections if d.get("species")}
+        current_recent = set(by_species)
+
+        # new_species — genuinely new arrivals. Naturally silent on a fresh
+        # install (the bootstrap pre-seeds _seen_species, so newly_seen is
+        # empty); on established installs these are real first-ever records.
+        for sp in newly_seen:
+            self._fire_event(TRIGGER_NEW_SPECIES, by_species[sp])
+
+        # unusual_visitor — a known species reappearing after a long absence.
+        # Skipped on the first poll of the session (no baseline yet) so a
+        # restart doesn't replay every long-absent bird currently in the
+        # window. The "newly present vs. previous window" gate then prevents
+        # re-firing while a bird lingers across polls.
+        if self._prev_recent_species is not None:
+            threshold_days = self.config_entry.options.get(
+                CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS
+            )
+            now = datetime.now(timezone.utc)
+            for sp in current_recent - self._prev_recent_species:
+                if sp in newly_seen:
+                    continue  # brand-new → already fired as new_species
+                prior = _parse_dt(prior_last_seen.get(sp))
+                if prior is None:
+                    continue
+                days_absent = (now - prior).days
+                if days_absent >= threshold_days:
+                    self._fire_event(
+                        TRIGGER_UNUSUAL_VISITOR,
+                        by_species[sp],
+                        days_absent=days_absent,
+                    )
+
+        self._prev_recent_species = current_recent
+
+    def _fire_event(
+        self, trigger_type: str, record: dict[str, Any], **extra: Any
+    ) -> None:
+        """Assemble and fire one haikubox_event for a species record."""
+        device = dr.async_get(self.hass).async_get_device(
+            identifiers={(DOMAIN, self.serial)}
+        )
+        if device is None:
+            return  # device not in the registry yet (only on first-ever setup)
+        self.hass.bus.async_fire(
+            EVENT_HAIKUBOX,
+            {
+                "device_id": device.id,
+                "serial": self.serial,
+                "device_name": self.device_name,
+                "type": trigger_type,
+                "species": record.get("species"),
+                "scientific_name": record.get("scientific_name"),
+                "sp_code": record.get("sp_code"),
+                "image_url": record.get("image_url"),
+                "last_seen": record.get("last_seen"),
+                "rarity_score": record.get("rarity_score"),
+                "yearly_rank": record.get("yearly_rank"),
+                **extra,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Store helpers
