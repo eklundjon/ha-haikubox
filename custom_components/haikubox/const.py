@@ -48,3 +48,19 @@ NEW_SPECIES_HISTORY_LIMIT = 50
 CONF_NOTABLE_RARITY_WEIGHT = "notable_rarity_weight"
 DEFAULT_NOTABLE_RARITY_WEIGHT = 70  # percent
 NOTABILITY_WINDOW_HOURS = 24
+
+# Automation events. A single bus event is fired for noteworthy detections;
+# the `type` field discriminates, matching the device-automation convention
+# (cf. deconz_event / bthome_ble_event). Device triggers filter on `type`.
+EVENT_HAIKUBOX = "haikubox_event"
+TRIGGER_NEW_SPECIES = "new_species"          # first time ever on this box
+TRIGGER_UNUSUAL_VISITOR = "unusual_visitor"  # known species back after a long absence
+TRIGGER_TYPES = (TRIGGER_NEW_SPECIES, TRIGGER_UNUSUAL_VISITOR)
+
+# unusual_visitor fires when a known species reappears after at least this
+# many days unheard. Built on the persisted last-seen gap, so it's immune to
+# the calendar-year reset that makes raw yearly rarity unreliable as an alert
+# (the reason `notable` blends in recency in the first place). Configurable
+# via the options flow.
+CONF_ABSENCE_DAYS = "absence_days"
+DEFAULT_ABSENCE_DAYS = 30

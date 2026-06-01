@@ -15,6 +15,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 - **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
 - **Bird details sensors** — top species this calendar year, top species (last 24 h), rarest species (7 d)
 - **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views
+- **Automations** — device triggers for new-species and unusual-visitor detections, plus blueprints for photo push notifications
 - Bird photos cached locally for offline resilience
 
 ## Quick start
@@ -68,6 +69,7 @@ Full card reference, including the ranked list card and `tap_action` configurati
 |---|---|
 | Full sensor reference, the `detections` attribute contract, rarity scoring, persistent state stores | [docs/sensors.md](docs/sensors.md) |
 | Both custom cards, YAML examples, tap actions, full dashboard example | [docs/cards.md](docs/cards.md) |
+| Device triggers, the `haikubox_event` payload, push-notification blueprints | [docs/automations.md](docs/automations.md) |
 | Custom polling cadence, changing the serial number | [docs/advanced.md](docs/advanced.md) |
 | First-install backfill timing, restart behaviour, card-cache issues, 0.3.x → 0.4.x upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Haikubox API endpoints, polling, image CDN, failure modes | [docs/api.md](docs/api.md) |

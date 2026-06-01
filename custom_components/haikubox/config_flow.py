@@ -21,9 +21,11 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     API_BASE,
+    CONF_ABSENCE_DAYS,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
+    DEFAULT_ABSENCE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DOMAIN,
 )
@@ -138,9 +140,11 @@ class HaikuboxOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
+        opts = self.config_entry.options
+        current_weight = opts.get(
             CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
         )
+        current_absence = opts.get(CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS)
 
         return self.async_show_form(
             step_id="init",
@@ -148,7 +152,7 @@ class HaikuboxOptionsFlow(OptionsFlow):
                 {
                     vol.Required(
                         CONF_NOTABLE_RARITY_WEIGHT,
-                        default=current,
+                        default=current_weight,
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=0,
@@ -156,6 +160,18 @@ class HaikuboxOptionsFlow(OptionsFlow):
                             step=5,
                             mode=NumberSelectorMode.SLIDER,
                             unit_of_measurement="%",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_ABSENCE_DAYS,
+                        default=current_absence,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=1,
+                            max=365,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="days",
                         )
                     ),
                 }

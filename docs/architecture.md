@@ -55,9 +55,10 @@ graph TB
 custom_components/haikubox/
 ├── __init__.py           # setup + teardown; migration shim; card registration
 ├── binary_sensor.py      # detection-problem binary sensor
-├── config_flow.py        # config flow (initial + reconfigure)
-├── const.py              # domain, conf keys, API base URLs, intervals
+├── config_flow.py        # config flow (initial + reconfigure) + options flow
+├── const.py              # domain, conf keys, API base URLs, intervals, event/trigger names
 ├── coordinator.py        # HaikuboxCoordinator + helpers (the brains)
+├── device_trigger.py     # new_species / unusual_visitor device triggers
 ├── diagnostics.py        # redacted state dump
 ├── image_cache.py        # ImageCache class
 ├── manifest.json         # HACS manifest (version stamped on release)
@@ -260,6 +261,36 @@ Both cards read sensor state from HA's frontend WebSocket connection — they ha
 - **Live relative-time ticker.** A 60-s `setInterval` wired in `connectedCallback` rewrites just the time-label text content (no full re-render), so labels like "5m ago" stay honest between the 10-min polls without flickering images or interrupting expansion animations.
 - **`setConfig` / `set hass` race guard.** HA's card lifecycle is normally `setConfig` → `set hass`, but during a dashboard reload or first-mount edge case `set hass` can arrive first. `_render` and `_handleTapAction` early-return when `!this._config` instead of throwing on `this._config.entity`, so the next `set hass` after `setConfig` produces a clean render rather than leaving the card stuck in HA's error state ("yellow !").
 - **Idempotent `customElements.define`.** If the integration JS gets loaded twice in the same page (cache flap during an HA upgrade, version-bust transient, etc.), the bottom-of-file `customElements.define(...)` and `customCards.push(...)` are wrapped in a `customElements.get(...)` check. A second load is a complete no-op rather than throwing and aborting mid-script.
+
+## Automation events
+
+The coordinator fires a single bus event, `haikubox_event`, for noteworthy
+detections, discriminated by a `type` field (`new_species` / `unusual_visitor`)
+— the same one-event-many-types convention HA uses for `deconz_event` /
+`bthome_ble_event`. `_fire_detection_events` runs at the end of each
+`_async_update_data`, after the lookup stores are updated:
+
+- **`new_species`** fires for species in `newly_seen` — those first recorded
+  this poll by the lifetime first-seen log. Naturally silent on a fresh-install
+  bootstrap (which pre-seeds `_seen_species`).
+- **`unusual_visitor`** fires when a species enters the recent window that
+  wasn't in the previous poll's window (`current_recent − _prev_recent_species`)
+  *and* whose prior last-seen gap meets the configured `absence_days` threshold.
+  `_prev_recent_species` starts `None`, so the first poll of a session only
+  baselines (no replay on restart); the edge gate stops re-firing while a bird
+  lingers across polls.
+
+[`device_trigger.py`](../custom_components/haikubox/device_trigger.py) exposes
+both as device triggers. `async_attach_trigger` delegates to the core event
+trigger platform (`homeassistant.components.homeassistant.triggers.event`),
+filtered to `haikubox_event` with matching `device_id` + `type` — so the device
+picker entry is a thin, well-supported wrapper over the bus event rather than a
+bespoke listener.
+
+The two notification **blueprints** live in `blueprints/automation/haikubox/`
+at the repo root (not under `custom_components/`). Custom integrations can't
+auto-install blueprints into a user's config, so they're distributed by import
+URL — see [docs/automations.md](automations.md).
 
 ## Design choices worth knowing
 

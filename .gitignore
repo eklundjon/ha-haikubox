@@ -24,6 +24,7 @@ htmlcov/
 *.swp
 *.swo
 .DS_Store
+.claude/
 
 # Home Assistant (if HA config is ever added here)
 *.log
