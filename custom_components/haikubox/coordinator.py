@@ -234,6 +234,21 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         seen_dirty = False
 
+        # Reconcile the lifetime first-seen log with the TRUE per-day history.
+        # On its own _seen_species only records when the *integration* first
+        # observed a species, so a recent (re)install makes everything look new
+        # (e.g. new-in-30-days == lifetime). daily_counts holds the box's real
+        # backfilled history, so a species' first_seen should be the earliest
+        # day it actually appears there. Walking oldest-first, set or lower each
+        # species' first_seen accordingly. This also stops the live new_species
+        # event from firing for species already present in that history.
+        for _day in sorted(self._daily_counts):
+            for _sp in self._daily_counts[_day]:
+                _prev = self._seen_species.get(_sp)
+                if _prev is None or _day < _prev[:10]:
+                    self._seen_species[_sp] = _day
+                    seen_dirty = True
+
         # Fresh-install bootstrap for _seen_species. Must run BEFORE the
         # recent-window loop below; otherwise that loop would seed
         # _seen_species from the 1h subset only and species detected 2-24h
