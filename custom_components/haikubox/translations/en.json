@@ -61,10 +61,10 @@
         "name": "Last detection"
       },
       "daily_count": {
-        "name": "Total detections (24 h)"
+        "name": "Detections today"
       },
       "daily_top_species": {
-        "name": "Top species (24 h)"
+        "name": "Top species (today)"
       },
       "notable_species": {
         "name": "Notable species"
@@ -80,6 +80,18 @@
       },
       "lifetime_species": {
         "name": "Lifetime species"
+      },
+      "species_diversity": {
+        "name": "Species diversity (today)"
+      },
+      "activity_level": {
+        "name": "Activity vs. typical"
+      },
+      "new_species_window": {
+        "name": "New species (30 d)"
+      },
+      "history_start": {
+        "name": "Detection history start"
       }
     },
     "binary_sensor": {

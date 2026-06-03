@@ -17,6 +17,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    ACTIVITY_BASELINE_DAYS,
     API_BASE,
     BACKFILL_REQUEST_DELAY,
     BACKFILL_STOP_AFTER_404,
@@ -34,6 +35,7 @@ from .const import (
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
     NEW_SPECIES_HISTORY_LIMIT,
+    NEW_SPECIES_WINDOW_DAYS,
     NOTABILITY_WINDOW_HOURS,
     RARITY_BACKFILL_CHUNK,
     RARITY_WINDOW_DAYS,
@@ -52,32 +54,33 @@ _STORE_VERSION = 1
 type HaikuboxConfigEntry = ConfigEntry[HaikuboxCoordinator]
 
 
-# Bundled common-name → eBird species_code fallback map. Haikubox's sp_code is
-# the eBird species code, and the image S3 is keyed by it — but we only *learn*
-# a species' code from the /detections sample, which omits rarely-heard species.
-# This derived map (from the eBird/Clements taxonomy) lets daily-count-only
-# species still resolve an image. See data/ebird_species_codes.json + NOTICE.
+# Bundled common-name → {eBird species_code, scientific name} fallback map.
+# Haikubox's sp_code is the eBird species code (the image S3 is keyed by it),
+# but we only *learn* a species' code and scientific name from the /detections
+# sample, which omits rarely-heard species. This derived map (from the
+# eBird/Clements taxonomy) lets daily-count-only species still resolve an image
+# and a scientific name. See data/ebird_species_codes.json + NOTICE.
 #
-# Loaded once, off the event loop (it's ~350 KB of JSON), via
-# _async_load_ebird_codes; _sp_code_for reads the module-level cache.
-_EBIRD_CODES: dict[str, str] | None = None
+# Loaded once, off the event loop (~750 KB of JSON), via
+# _async_load_ebird_species; _sp_code_for / _sci_name_for read the cache.
+_EBIRD_SPECIES: dict[str, dict[str, str]] | None = None
 
 
-def _read_ebird_codes() -> dict[str, str]:
+def _read_ebird_species() -> dict[str, dict[str, str]]:
     """Blocking read+parse of the bundled map. Call only via the executor."""
     path = Path(__file__).parent / "data" / "ebird_species_codes.json"
     try:
         return json.loads(path.read_text(encoding="utf-8")).get("names", {})
     except (OSError, ValueError):
-        _LOGGER.warning("Could not load bundled eBird species-code map")
+        _LOGGER.warning("Could not load bundled eBird species map")
         return {}
 
 
-async def _async_load_ebird_codes(hass: HomeAssistant) -> None:
-    """Populate the module-level eBird-code cache once, off the event loop."""
-    global _EBIRD_CODES
-    if _EBIRD_CODES is None:
-        _EBIRD_CODES = await hass.async_add_executor_job(_read_ebird_codes)
+async def _async_load_ebird_species(hass: HomeAssistant) -> None:
+    """Populate the module-level eBird species cache once, off the event loop."""
+    global _EBIRD_SPECIES
+    if _EBIRD_SPECIES is None:
+        _EBIRD_SPECIES = await hass.async_add_executor_job(_read_ebird_species)
 
 
 class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -231,6 +234,21 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 last_seen_dirty = True
 
         seen_dirty = False
+
+        # Reconcile the lifetime first-seen log with the TRUE per-day history.
+        # On its own _seen_species only records when the *integration* first
+        # observed a species, so a recent (re)install makes everything look new
+        # (e.g. new-in-30-days == lifetime). daily_counts holds the box's real
+        # backfilled history, so a species' first_seen should be the earliest
+        # day it actually appears there. Walking oldest-first, set or lower each
+        # species' first_seen accordingly. This also stops the live new_species
+        # event from firing for species already present in that history.
+        for _day in sorted(self._daily_counts):
+            for _sp in self._daily_counts[_day]:
+                _prev = self._seen_species.get(_sp)
+                if _prev is None or _day < _prev[:10]:
+                    self._seen_species[_sp] = _day
+                    seen_dirty = True
 
         # Fresh-install bootstrap for _seen_species. Must run BEFORE the
         # recent-window loop below; otherwise that loop would seed
@@ -401,6 +419,50 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # poll's qualifying species, then advance the recent-window baseline.
         self._fire_detection_events(detections, newly_seen, prior_last_seen)
 
+        # Today's TRUE per-species counts. The /detections feed is only a
+        # ≤5-per-species recency sample, so daily *volume* and diversity must
+        # come from /daily-count (the same source as the rarity baseline).
+        # Today is a partial, still-accumulating calendar day; fetched fresh
+        # each poll. (See issue #44 re: daily_count's capped-feed undercount.)
+        try:
+            today_species = await self._fetch_daily_count(today.isoformat()) or {}
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Could not fetch today's daily count: %s", err)
+            today_species = {}
+        today_total = sum(today_species.values())
+
+        # Activity-vs-typical: compare the most recent *completed* day to the
+        # mean of completed days over the trailing ACTIVITY_BASELINE_DAYS
+        # (excluding zero/offline days). Completed days only (not today's
+        # partial), so the ratio is a stable full-day-vs-full-day comparison.
+        today_str = today.isoformat()
+        baseline_cutoff = (today - timedelta(days=ACTIVITY_BASELINE_DAYS)).isoformat()
+        completed = {
+            d: sum(c.values()) for d, c in self._daily_counts.items() if d < today_str
+        }
+        window_totals = [
+            t for d, t in completed.items() if d >= baseline_cutoff and t > 0
+        ]
+        typical_daily = (
+            round(sum(window_totals) / len(window_totals), 1) if window_totals else None
+        )
+        latest_day = max(completed) if completed else None
+        latest_day_total = completed[latest_day] if latest_day else None
+
+        # New-species momentum: how many species were first heard in the last
+        # NEW_SPECIES_WINDOW_DAYS, and days since the most recent lifetime
+        # first. first_seen values are ISO strings (date or datetime); compare
+        # on the YYYY-MM-DD prefix (lexicographic == chronological for ISO).
+        new_cutoff = (today - timedelta(days=NEW_SPECIES_WINDOW_DAYS)).isoformat()
+        first_seen_dates = [fs[:10] for fs in self._seen_species.values() if fs]
+        new_species_window = sum(1 for fs in first_seen_dates if fs >= new_cutoff)
+        days_since_new: int | None = None
+        if first_seen_dates:
+            try:
+                days_since_new = (today - date.fromisoformat(max(first_seen_dates))).days
+            except ValueError:
+                days_since_new = None
+
         return {
             # key == sensor id; the public list attribute is always
             # `detections`. Singular keys are sticky single records;
@@ -412,8 +474,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_detection": self._last_detected,           # sticky
             "recent_events": _ranked(recent_events),         # per-event by dt desc
             "notable_detection": self._last_notable,         # sticky
-            "daily_count": daily_count,                      # 24h per-species — total only
-            "daily_top_species": _ranked(self._build_daily_list(daily_count)),  # by 24h count
+            # Capped (≤5/species) trailing-24h list from /detections. No longer
+            # the daily_count *sensor's* value (that's today_total now) — kept
+            # for the extended-silence emptiness check and rarest's "seen today"
+            # membership, both of which only need presence, not true counts.
+            "daily_count": daily_count,
+            "daily_top_species": _ranked(self._build_today_top(today_species)),  # true counts, today
             "notable_detections": _ranked(notable),          # by rarity
             # Sticky lifetime-history list (N most recently first-seen
             # species, newest first). Derived from _seen_species, not from
@@ -425,6 +491,19 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lifetime_species_count": len(self._seen_species),
             "yearly_top_species": self._build_yearly_top(),  # by yearly count (own rank)
             "rarest_species": _ranked(seven_day_rare),       # by rarity
+            "today_total": today_total,                       # true daily total (/daily-count)
+            "today_species": today_species,                   # true per-species map (diversity)
+            "typical_daily_count": typical_daily,             # mean active completed-day total
+            "latest_day_total": latest_day_total,             # most recent completed day's total
+            "latest_day_date": latest_day,                    # its date (ISO)
+            "new_species_window": new_species_window,         # first-seen in last N days
+            "days_since_new_species": days_since_new,         # since most recent lifetime-first
+            # Backfill coverage (diagnostic): how far back the daily-count
+            # history reaches, how many days are stored, and whether the
+            # backward backfill has reached the box's install floor.
+            "history_earliest": min(self._daily_counts) if self._daily_counts else None,
+            "history_days_recorded": len(self._daily_counts),
+            "history_complete": self._backfill_complete,
         }
 
     # ------------------------------------------------------------------
@@ -567,7 +646,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Preload the bundled eBird-code fallback map off the event loop, so
         # the synchronous _sp_code_for() lookups during a poll never touch disk.
-        await _async_load_ebird_codes(self.hass)
+        await _async_load_ebird_species(self.hass)
 
         self._stores_loaded = True
 
@@ -701,7 +780,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             rank = self._yearly_ranks.get(sp, self._yearly_species_count)
             out.append({
                 "species": sp,
-                "scientific_name": self._sci_names.get(sp, ""),
+                "scientific_name": self._sci_name_for(sp),
                 "sp_code": sp_code,
                 "image_url": self._images.url_for(sp_code),
                 "last_seen": self._last_seen.get(sp),
@@ -721,7 +800,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else fall back to the bundled eBird map. The fallback lets species seen
         only via /daily-count (e.g. rare birds the /detections sample misses)
         still get an image. Empty string when truly unknown."""
-        return self._sp_codes.get(species) or (_EBIRD_CODES or {}).get(species, "")
+        return self._sp_codes.get(species) or (_EBIRD_SPECIES or {}).get(species, {}).get("code", "")
+
+    def _sci_name_for(self, species: str) -> str:
+        """Resolve a species' scientific name: prefer what we learned from
+        /detections, else fall back to the bundled eBird map (so daily-count-only
+        species still show a scientific name). Empty string when unknown."""
+        return self._sci_names.get(species) or (_EBIRD_SPECIES or {}).get(species, {}).get("sci", "")
 
     def _build_yearly_top(self) -> list[dict[str, Any]]:
         """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
@@ -732,25 +817,38 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result.append({
                 **item,
                 "sp_code": sp_code,
-                "scientific_name": self._sci_names.get(sp, ""),
+                "scientific_name": self._sci_name_for(sp),
                 "last_seen": self._last_seen.get(sp),
                 "image_url": self._images.url_for(sp_code),
             })
         return result
 
-    def _build_daily_list(self, daily_count: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Today's species (count desc) enriched with sp_code, scientific_name, last_seen, image."""
-        result = []
-        for item in daily_count:
-            sp = item["species"]
+    def _build_today_top(self, today_species: dict[str, int]) -> list[dict[str, Any]]:
+        """Today's species ranked by TRUE detection count (from /daily-count),
+        enriched with sp_code, scientific_name, last_seen, image, and the
+        trailing-window rarity score.
+
+        Replaces the old /detections-derived list, whose per-species counts were
+        clamped at the ≤5-per-species sample cap — so its "top species" ranking
+        was meaningless ties at 5 (issue #44). This uses the true calendar-day
+        counts instead.
+        """
+        denom = max(self._yearly_species_count, 1)
+        result: list[dict[str, Any]] = []
+        for sp, count in today_species.items():
             sp_code = self._sp_code_for(sp)
+            rank = self._yearly_ranks.get(sp, self._yearly_species_count)
             result.append({
-                **item,
+                "species": sp,
+                "scientific_name": self._sci_name_for(sp),
                 "sp_code": sp_code,
-                "scientific_name": self._sci_names.get(sp, ""),
-                "last_seen": self._last_seen.get(sp),
                 "image_url": self._images.url_for(sp_code),
+                "last_seen": self._last_seen.get(sp),
+                "count": count,
+                "rarity_score": round(rank / denom, 4),
+                "yearly_rank": rank,
             })
+        result.sort(key=lambda x: x["count"], reverse=True)
         return result
 
     def _build_new_species_history(self) -> list[dict[str, Any]]:
@@ -776,7 +874,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             rank = self._yearly_ranks.get(species, self._yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
-                "scientific_name": self._sci_names.get(species, ""),
+                "scientific_name": self._sci_name_for(species),
                 "sp_code": sp_code,
                 "image_url": self._images.url_for(sp_code),
                 "last_seen": self._last_seen.get(species),

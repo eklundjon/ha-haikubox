@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+import math
+from datetime import date, datetime, timezone
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -31,6 +39,10 @@ async def async_setup_entry(
             HaikuboxYearlyTopSpeciesSensor(coordinator, serial),
             HaikuboxRarestSpeciesSensor(coordinator, serial),
             HaikuboxLifetimeSpeciesSensor(coordinator, serial),
+            HaikuboxSpeciesDiversitySensor(coordinator, serial),
+            HaikuboxActivitySensor(coordinator, serial),
+            HaikuboxNewSpeciesMomentumSensor(coordinator, serial),
+            HaikuboxHistoryDepthSensor(coordinator, serial),
         ]
     )
 
@@ -120,26 +132,27 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
 
 
 class HaikuboxDailyCountSensor(_HaikuboxSensor):
-    """Total individual detections over the trailing 24 hours."""
+    """Total detections so far today — the box's true bird-traffic volume.
+
+    Sourced from /daily-count (true per-species counts), not the ≤5-per-species
+    /detections sample, so it reflects real volume (often thousands/day) rather
+    than the old clamped ~120 (issue #44). It's a partial calendar day that
+    grows through the day and resets at UTC midnight. (True *hourly* volume
+    isn't available from the API — the only accurate grain is the calendar day.)
+    """
 
     _attr_translation_key = "daily_count"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = "detections"
-    # Rolling 24h total: rises and falls as the window slides, so it is a
-    # MEASUREMENT, not a TOTAL_INCREASING counter (which would treat every
-    # decrease as a meter reset and corrupt long-term statistics).
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_daily_count"
 
-    # Pure total counter — the 24h species list lives on daily_top_species.
     @property
     def native_value(self) -> int:
-        return sum(
-            s.get("count", 0) for s in self.coordinator.data.get("daily_count", [])
-        )
+        return self.coordinator.data.get("today_total", 0)
 
 
 class HaikuboxDailyTopSpeciesSensor(_HaikuboxSensor):
@@ -318,3 +331,156 @@ class HaikuboxLifetimeSpeciesSensor(_HaikuboxSensor):
     @property
     def native_value(self) -> int:
         return self.coordinator.data.get("lifetime_species_count", 0)
+
+
+class HaikuboxSpeciesDiversitySensor(_HaikuboxSensor):
+    """Shannon diversity index (H′) over today's detections.
+
+    H′ = −Σ pᵢ·ln(pᵢ), where pᵢ is each species' share of today's TRUE
+    per-species counts (from /daily-count — the ≤5/species /detections sample
+    would flatten the distribution and make this meaningless). One number for
+    how varied activity is, not just how much: ~0 when one species dominates,
+    higher with more species detected evenly. Exposes species richness and
+    Pielou evenness (H′/ln S, 0–1) as attributes.
+    """
+
+    _attr_translation_key = "species_diversity"
+    _attr_icon = "mdi:sprout"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_species_diversity"
+
+    def _shannon(self) -> tuple[float, int]:
+        counts = [
+            c for c in self.coordinator.data.get("today_species", {}).values() if c > 0
+        ]
+        total = sum(counts)
+        if total <= 0:
+            return 0.0, 0
+        h = -sum((c / total) * math.log(c / total) for c in counts)
+        return (h if h > 0 else 0.0), len(counts)  # normalise -0.0 → 0.0
+
+    @property
+    def native_value(self) -> float:
+        h, _ = self._shannon()
+        return round(h, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        h, richness = self._shannon()
+        if richness > 1:
+            evenness = round(h / math.log(richness), 2)
+        else:
+            evenness = 1.0 if richness == 1 else 0.0
+        return {"richness": richness, "evenness": evenness}
+
+
+class HaikuboxActivitySensor(_HaikuboxSensor):
+    """Most recent full day's detection volume relative to a typical day.
+
+    Ratio of the latest *completed* day's total to the mean total over the last
+    30 active days (both true /daily-count figures): 1.0 ≈ a normal day, 2.0 ≈
+    twice as busy, 0.5 ≈ half. A completed-day comparison (not today's partial),
+    so it's stable rather than ramping through the day. `unknown` until there's
+    a baseline. Exposes the day, its total, and the typical figure.
+    """
+
+    _attr_translation_key = "activity_level"
+    _attr_icon = "mdi:speedometer"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_activity_level"
+
+    @property
+    def native_value(self) -> float | None:
+        typical = self.coordinator.data.get("typical_daily_count")
+        latest = self.coordinator.data.get("latest_day_total")
+        if not typical or latest is None:
+            return None
+        return round(latest / typical, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "as_of_date": self.coordinator.data.get("latest_day_date"),
+            "day_total": self.coordinator.data.get("latest_day_total"),
+            "typical_daily_count": self.coordinator.data.get("typical_daily_count"),
+        }
+
+
+class HaikuboxNewSpeciesMomentumSensor(_HaikuboxSensor):
+    """How many species were first heard on this box in the last 30 days.
+
+    A "discovery momentum" counter — high while your life list is growing fast
+    (new install, spring migration), settling toward 0 once the box has heard
+    most local regulars. Exposes `days_since_new_species` (gap since the most
+    recent lifetime-first) as an attribute. Derived from the seen_species
+    first-seen log, independent of detection counts.
+    """
+
+    _attr_translation_key = "new_species_window"
+    _attr_icon = "mdi:trending-up"
+    _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_new_species_window"
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.data.get("new_species_window", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "days_since_new_species": self.coordinator.data.get("days_since_new_species"),
+        }
+
+
+class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
+    """Diagnostic: how far back the per-day detection history reaches.
+
+    State is the earliest day we have `/daily-count` data for. On a fresh
+    install it walks backward each poll (the throttled backfill) until it
+    reaches the box's install date, then holds. Attributes report how many days
+    are stored, the calendar span, and whether the backfill is complete.
+    """
+
+    _attr_translation_key = "history_start"
+    _attr_icon = "mdi:history"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_history_start"
+
+    @property
+    def native_value(self) -> datetime | None:
+        earliest = self.coordinator.data.get("history_earliest")
+        if not earliest:
+            return None
+        try:
+            return datetime.fromisoformat(earliest).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        earliest = self.coordinator.data.get("history_earliest")
+        span = None
+        if earliest:
+            try:
+                span = (datetime.now(timezone.utc).date() - date.fromisoformat(earliest)).days
+            except ValueError:
+                span = None
+        return {
+            "days_recorded": self.coordinator.data.get("history_days_recorded", 0),
+            "days_span": span,
+            "backfill_complete": self.coordinator.data.get("history_complete", False),
+        }

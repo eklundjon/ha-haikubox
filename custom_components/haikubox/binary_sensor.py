@@ -4,6 +4,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -46,6 +47,10 @@ class HaikuboxExtendedSilenceSensor(
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_translation_key = "extended_silence"
+    # Device-health signal (is the box alive?), not a bird observation — so it
+    # belongs in the device's Diagnostic section. Still fully usable in
+    # automations/alerts; entity_id and history are unchanged.
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator)
