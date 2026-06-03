@@ -22,17 +22,18 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
-    DAILY_BACKFILL_CHUNK,
     DAILY_WINDOW_HOURS,
     DEFAULT_ABSENCE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     EVENT_HAIKUBOX,
+    HISTORY_BACKFILL_CHUNK,
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
     NEW_SPECIES_HISTORY_LIMIT,
     NOTABILITY_WINDOW_HOURS,
+    RARITY_BACKFILL_CHUNK,
     RARITY_WINDOW_DAYS,
     RECENT_WINDOW_HOURS,
     TRIGGER_NEW_SPECIES,
@@ -533,7 +534,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         floor is reached. Persists once if anything changed (~1 write/day in
         steady state — far fewer than the old per-poll seven_day writes)."""
         yesterday = today - timedelta(days=1)
-        budget = DAILY_BACKFILL_CHUNK
+        # Two-tier throttle: fetch faster while the rarity-relevant trailing
+        # window (RARITY_WINDOW_DAYS) isn't covered, then ease off for the
+        # deep-history tail (future trend features only, not rarity).
+        # "Covered" = we have data back to the window floor, or the backfill
+        # already hit the pre-install floor (box younger than the window).
+        window_floor = (today - timedelta(days=RARITY_WINDOW_DAYS)).isoformat()
+        window_covered = self._backfill_complete or (
+            bool(self._daily_counts) and min(self._daily_counts) <= window_floor
+        )
+        budget = HISTORY_BACKFILL_CHUNK if window_covered else RARITY_BACKFILL_CHUNK
         changed = False
         try:
             # Forward-fill completed days, newest-first, until we reach known

@@ -64,8 +64,11 @@ TRIGGER_TYPES = (TRIGGER_NEW_SPECIES, TRIGGER_UNUSUAL_VISITOR)
 # true first-seen); rarity sums only the trailing RARITY_WINDOW_DAYS.
 RARITY_WINDOW_DAYS = 365
 # Throttle the one-time historical backfill so a fresh install doesn't hammer
-# the API: fetch at most this many missing days per poll, walking backward.
-DAILY_BACKFILL_CHUNK = 15
+# the API. Two-tier (days fetched per poll, walking backward): fetch the
+# rarity-relevant trailing year quickly, then ease off for the deep-history
+# tail (which only feeds future trend features, not rarity scoring).
+RARITY_BACKFILL_CHUNK = 30   # while the trailing RARITY_WINDOW_DAYS isn't covered
+HISTORY_BACKFILL_CHUNK = 10  # once rarity is covered, for the remaining lifetime
 # Stop backfilling after this many consecutive 404s walking backward — that's
 # the box's pre-install floor (data is contiguous from the install date).
 # A small threshold tolerates an isolated offline day mid-history.

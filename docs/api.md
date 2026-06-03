@@ -103,7 +103,7 @@ The integration's clock and the API's `dt` timestamps both live in UTC; the filt
 
 ### Polling cost
 
-One `/detections` call per poll, every 10 minutes → **144 detection calls per box per day**, plus roughly **one `/daily-count` fetch per day** in steady state (the newly-completed day), and per-species image fetches (write-once). On a *fresh* install there's also a one-time historical backfill — up to `DAILY_BACKFILL_CHUNK` (15) days per poll, spaced by `BACKFILL_REQUEST_DELAY`, walking back to the box's install date — which spreads over a few hours rather than firing in one burst. Comfortably within any sensible rate budget.
+One `/detections` call per poll, every 10 minutes → **144 detection calls per box per day**, plus roughly **one `/daily-count` fetch per day** in steady state (the newly-completed day), and per-species image fetches (write-once). On a *fresh* install there's also a one-time historical backfill — `RARITY_BACKFILL_CHUNK` (30) days per poll while the trailing year is still being covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for older history — each request spaced by `BACKFILL_REQUEST_DELAY` and walking back to the box's install date. It spreads over an hour or two for the rarity-relevant year, longer for the deep tail, rather than firing in one burst. Comfortably within any sensible rate budget.
 
 ## `GET /haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` — rarity baseline
 
@@ -114,7 +114,7 @@ Returns one calendar day's per-species counts as a flat list (`[{bird, count}]`)
 **The store.** Per-day counts accumulate in `.storage/haikubox.<serial>.daily_counts` as `{ "YYYY-MM-DD": { species: count } }`, **completed days only**, kept for the box's full lifetime (a reusable dataset). Each poll, `_ensure_daily_counts`:
 
 1. **Forward-fills** any newly-completed day(s) since the last run (newest-first, until it reaches data it already has).
-2. **Backfills** older history toward the install date, at most `DAILY_BACKFILL_CHUNK` (15) days per poll, spaced by `BACKFILL_REQUEST_DELAY`. A `404` means "before the box existed" — after `BACKFILL_STOP_AFTER_404` (3) consecutive 404s the backfill is marked complete.
+2. **Backfills** older history toward the install date — `RARITY_BACKFILL_CHUNK` (30) days per poll until the trailing `RARITY_WINDOW_DAYS` is covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for the deep-history tail — each spaced by `BACKFILL_REQUEST_DELAY`. A `404` means "before the box existed" — after `BACKFILL_STOP_AFTER_404` (3) consecutive 404s the backfill is marked complete.
 3. Persists once if anything changed (a `try/finally` ensures partial progress survives a mid-chunk failure or restart) — ~1 write/day in steady state.
 
 **Scoring.** `_rebuild_baseline` aggregates the trailing **`RARITY_WINDOW_DAYS`** (365) of stored counts into a `{species → rank}` map via `_ranks_from_counts`. That's what rarity divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `1.0` (capped, tied with the rarest known species). Because it's a sliding window, the same species' rarity stays stable across a calendar year-end instead of jumping.
