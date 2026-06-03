@@ -69,10 +69,14 @@ RARITY_WINDOW_DAYS = 365
 # tail (which only feeds future trend features, not rarity scoring).
 RARITY_BACKFILL_CHUNK = 30   # while the trailing RARITY_WINDOW_DAYS isn't covered
 HISTORY_BACKFILL_CHUNK = 10  # once rarity is covered, for the remaining lifetime
-# Stop backfilling after this many consecutive 404s walking backward — that's
-# the box's pre-install floor (data is contiguous from the install date).
-# A small threshold tolerates an isolated offline day mid-history.
-BACKFILL_STOP_AFTER_404 = 3
+# Treat this many consecutive 404s (days that pre-date the box) while extending
+# older than all known data as the pre-install floor, and stop the deep
+# backfill. The count persists across polls and only the older-than-known
+# extension feeds it — gaps *inside* the known date range are recorded as empty
+# and never counted. Generous enough to walk through a realistic multi-day
+# outage and resume on real data beyond it. (The API gives no install date to
+# anchor to — see _ensure_daily_counts.)
+BACKFILL_STOP_AFTER_404 = 14
 # Politeness delay (seconds) between consecutive backfill requests, so a fresh
 # install's chunk of historical fetches doesn't burst the API and trip a rate
 # limit. On a 429/5xx we also pause backfill until the next poll (~10 min).

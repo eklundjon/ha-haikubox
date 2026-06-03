@@ -92,6 +92,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._yearly_items: list[dict[str, Any]] = []    # trailing-window baseline [{species, count, rank}]
         self._daily_counts: dict[str, dict[str, int]] = {}  # date_str → {species: count}, full lifetime
         self._backfill_complete: bool = False            # reached the pre-install 404 floor
+        self._backfill_cursor: str | None = None         # oldest date the deep backfill has probed
+        self._backfill_misses: int = 0                   # consecutive 404s at the leading (oldest) edge
         self._stores_loaded: bool = False
 
         # Automation-event edge detection. Species present in the recent
@@ -492,12 +494,19 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sci_names      = sci_names if isinstance(sci_names, dict) else {}
         self._last_seen      = last_seen if isinstance(last_seen, dict) else {}
         if isinstance(daily, dict):
-            days = daily.get("days")
-            self._daily_counts = days if isinstance(days, dict) else {}
+            # Sanitize on load: a corrupt/hand-edited store should rebuild via
+            # backfill, not crash _rebuild_baseline on every poll.
+            self._daily_counts = _sanitize_daily_counts(daily.get("days"))
             self._backfill_complete = bool(daily.get("backfill_complete"))
+            cursor = daily.get("cursor")
+            self._backfill_cursor = cursor if isinstance(cursor, str) else None
+            misses = daily.get("misses")
+            self._backfill_misses = misses if isinstance(misses, int) and misses >= 0 else 0
         else:
             self._daily_counts = {}
             self._backfill_complete = False
+            self._backfill_cursor = None
+            self._backfill_misses = 0
 
         # Rehydrate the sticky records so last_detection / notable_species
         # show their last value immediately after a restart instead of
@@ -529,16 +538,29 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._stores_loaded = True
 
     async def _ensure_daily_counts(self, today: date) -> None:
-        """Keep _daily_counts current: forward-fill newly-completed days, then
-        backfill older history in throttled chunks until the pre-install 404
-        floor is reached. Persists once if anything changed (~1 write/day in
-        steady state — far fewer than the old per-poll seven_day writes)."""
+        """Keep _daily_counts current and gap-free, then extend history.
+
+        Two phases per poll share one throttled budget:
+
+          1. **Fill gaps** in `[oldest known … yesterday]`, newest-first. This
+             covers newly-completed days *and* repairs holes left by HA /
+             internet downtime. A 404 or empty result *in range* is stored as
+             `{}` ("checked, no data") so it isn't re-fetched and contributes 0.
+          2. **Extend older** than the oldest known day (deep backfill) via a
+             persisted cursor, stopping at the pre-install floor. Only 404s
+             *here* count toward the floor (`_backfill_misses`, persisted across
+             polls); an empty day resets the count and a real-data day records.
+
+        Because the cursor advances regardless of result, a 404-gap larger than
+        one poll's budget never stalls the walk; because gaps inside the known
+        range are handled in phase 1, they can't be mistaken for the floor.
+
+        Budget is two-tier (fast while the rarity window isn't covered, then
+        gentle for the deep tail). A `try/finally` persists partial progress so
+        a mid-chunk failure or restart never wastes work; the backfill resumes
+        from the stored watermark.
+        """
         yesterday = today - timedelta(days=1)
-        # Two-tier throttle: fetch faster while the rarity-relevant trailing
-        # window (RARITY_WINDOW_DAYS) isn't covered, then ease off for the
-        # deep-history tail (future trend features only, not rarity).
-        # "Covered" = we have data back to the window floor, or the backfill
-        # already hit the pre-install floor (box younger than the window).
         window_floor = (today - timedelta(days=RARITY_WINDOW_DAYS)).isoformat()
         window_covered = self._backfill_complete or (
             bool(self._daily_counts) and min(self._daily_counts) <= window_floor
@@ -546,57 +568,63 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         budget = HISTORY_BACKFILL_CHUNK if window_covered else RARITY_BACKFILL_CHUNK
         changed = False
         try:
-            # Forward-fill completed days, newest-first, until we reach known
-            # data. On a fresh install (empty store) this begins the backward
-            # walk; on an established install it grabs just the day(s) completed
-            # since the last run.
+            # Phase 1 — fill gaps in [oldest known .. yesterday], newest-first.
+            range_start = (
+                date.fromisoformat(min(self._daily_counts))
+                if self._daily_counts
+                else yesterday
+            )
             d = yesterday
-            while budget > 0 and d.isoformat() not in self._daily_counts:
-                res = await self._fetch_daily_count(d.isoformat())
-                budget -= 1
-                if res is None:
-                    break  # no data for a recent day (rare) — stop forward-fill
-                self._daily_counts[d.isoformat()] = res
-                changed = True
-                d -= timedelta(days=1)
-                await asyncio.sleep(BACKFILL_REQUEST_DELAY)
-
-            # Historical backfill: continue older, stopping at the 404 floor.
-            if not self._backfill_complete and budget > 0 and self._daily_counts:
-                cur = date.fromisoformat(min(self._daily_counts)) - timedelta(days=1)
-                misses = 0
-                while budget > 0 and misses < BACKFILL_STOP_AFTER_404:
-                    ds = cur.isoformat()
-                    if ds not in self._daily_counts:
-                        res = await self._fetch_daily_count(ds)
-                        budget -= 1
-                        if res is None:
-                            misses += 1
-                        else:
-                            self._daily_counts[ds] = res
-                            changed = True
-                            misses = 0
-                        await asyncio.sleep(BACKFILL_REQUEST_DELAY)
-                    cur -= timedelta(days=1)
-                if misses >= BACKFILL_STOP_AFTER_404:
-                    self._backfill_complete = True
+            while budget > 0 and d >= range_start:
+                ds = d.isoformat()
+                if ds not in self._daily_counts:
+                    res = await self._fetch_daily_count(ds)
+                    budget -= 1
+                    self._daily_counts[ds] = res if res is not None else {}
                     changed = True
+                    await asyncio.sleep(BACKFILL_REQUEST_DELAY)
+                d -= timedelta(days=1)
+
+            # Phase 2 — extend older than the oldest known day, via the cursor.
+            if not self._backfill_complete and budget > 0:
+                if self._backfill_cursor is not None:
+                    cur = date.fromisoformat(self._backfill_cursor) - timedelta(days=1)
+                elif self._daily_counts:
+                    cur = date.fromisoformat(min(self._daily_counts)) - timedelta(days=1)
+                else:
+                    cur = yesterday  # nothing known yet (phase 1 found no data)
+                while budget > 0 and self._backfill_misses < BACKFILL_STOP_AFTER_404:
+                    res = await self._fetch_daily_count(cur.isoformat())
+                    budget -= 1
+                    if res is None:                       # 404 → pre-install (or a 404 gap)
+                        self._backfill_misses += 1
+                    else:                                  # {} or data → the day exists
+                        self._daily_counts[cur.isoformat()] = res
+                        self._backfill_misses = 0
+                    self._backfill_cursor = cur.isoformat()
+                    changed = True
+                    await asyncio.sleep(BACKFILL_REQUEST_DELAY)
+                    cur -= timedelta(days=1)
+                if self._backfill_misses >= BACKFILL_STOP_AFTER_404:
+                    self._backfill_complete = True
         except aiohttp.ClientResponseError as err:
-            # Unexpected HTTP status (e.g. 429 rate limit, 5xx). Stop the
+            # Unexpected HTTP status (e.g. 429 rate limit, 5xx). Pause the
             # backfill for this poll and keep whatever we fetched; the next
-            # poll (~10 min later) resumes — a natural backoff. We do NOT
-            # advance the 404 floor here, so a transient limit can't end the
-            # backfill early or be mistaken for the pre-install boundary.
+            # poll (~10 min later) resumes — a natural backoff. The floor count
+            # is untouched, so a transient limit can't end the backfill early.
             _LOGGER.warning(
                 "daily-count returned HTTP %s (%s) — pausing backfill until next poll",
                 err.status, err.message,
             )
         finally:
-            # Persist whatever we fetched even if a later request raised, so a
-            # mid-chunk failure (or a restart) doesn't waste the work.
             if changed:
                 await self._daily_store.async_save(
-                    {"days": self._daily_counts, "backfill_complete": self._backfill_complete}
+                    {
+                        "days": self._daily_counts,
+                        "backfill_complete": self._backfill_complete,
+                        "cursor": self._backfill_cursor,
+                        "misses": self._backfill_misses,
+                    }
                 )
 
     def _rebuild_baseline(self, today: date) -> None:
@@ -752,9 +780,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _fetch_daily_count(self, date_str: str) -> dict[str, int] | None:
         """One calendar day's per-species counts as {species: count}.
 
-        Returns None for a 404 (date before the box was installed — the
-        backfill floor) or an empty/non-JSON body, so callers can treat
-        "no data for that day" uniformly without erroring the poll.
+        Returns **None only for a 404** — a date before the box existed, the
+        backfill floor signal. A 200 with an empty or unparseable body returns
+        `{}` ("the day exists, just no data"), which the backfill treats as a
+        recorded no-data day rather than a floor hit. This distinction is what
+        lets an in-history outage gap (offline days) be told apart from the
+        pre-install void.
         """
         url = f"{API_BASE}/haikubox/{self.serial}/daily-count"
         async with self._session.get(url, params={"date": date_str}) as resp:
@@ -764,9 +795,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 data = await resp.json(content_type=None)
             except (aiohttp.ContentTypeError, ValueError):
-                return None
+                return {}
         if not isinstance(data, list):
-            return None
+            return {}
         out: dict[str, int] = {}
         for item in data:
             if isinstance(item, dict) and item.get("bird"):
@@ -915,6 +946,37 @@ def _first_seen_per_species(raw: Any) -> dict[str, str]:
             best_parsed[sp] = parsed
             out[sp] = dt_str  # the original string form
     return out
+
+
+def _sanitize_daily_counts(raw: Any) -> dict[str, dict[str, int]]:
+    """Validate a persisted daily-counts blob, dropping anything malformed.
+
+    Keeps only entries keyed by a valid ISO date whose value is a mapping of
+    species name (str) → integer count. A corrupt or hand-edited store thus
+    degrades to "rebuild via backfill" instead of crashing the rebuild/poll.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    clean: dict[str, dict[str, int]] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            date.fromisoformat(key)
+        except ValueError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        inner: dict[str, int] = {}
+        for sp, count in value.items():
+            if not isinstance(sp, str):
+                continue
+            try:
+                inner[sp] = int(count)
+            except (ValueError, TypeError):
+                continue
+        clean[key] = inner
+    return clean
 
 
 def _ranks_from_counts(
