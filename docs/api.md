@@ -10,7 +10,7 @@ The integration is a one-way **cloud_polling** consumer: it reads from the publi
 |---|---|---|---|
 | `GET https://api.haikubox.com/haikubox/<serial>` | Config flow (initial setup + reconfigure) | None | `{ "haikuboxName": "<name>", … }` |
 | `GET https://api.haikubox.com/haikubox/<serial>/detections?hours=24` | Every poll, once | None | `{ "detections": [ {cn, sn, spCode, dt}, … ] }` |
-| `GET https://api.haikubox.com/haikubox/<serial>/yearly-count` | First poll of each calendar day | None | `[ { "bird": "<name>", "count": <int> }, … ]` |
+| `GET https://api.haikubox.com/haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` | Newly-completed days each poll + a throttled one-time historical backfill | None | `[ { "bird": "<name>", "count": <int> }, … ]` (`404` for dates before the box was installed) |
 | `GET https://haikubox-images.s3.amazonaws.com/<sp_code>.jpeg` | Once per species, lazily | None | Binary JPEG |
 
 All requests use Home Assistant's shared `aiohttp` session via `async_get_clientsession(hass)`. No authentication headers are sent; the serial number in the URL path is the only access token the integration provides.
@@ -32,14 +32,13 @@ sequenceDiagram
     HA->>Coord: _async_update_data() - every 10 min
 
     alt First call after restart
-        Coord->>Store: load 7 .storage files
+        Coord->>Store: load 6 .storage files
     end
 
-    alt First poll of a new calendar day
-        Coord->>API: GET /yearly-count
-        API-->>Coord: list of bird counts
-        Coord->>Store: save yearly
-    end
+    Coord->>API: GET /daily-count?date - newly-completed day(s) + backfill chunk
+    API-->>Coord: per-day bird counts (404 before install date)
+    Note right of Coord: aggregate the trailing 365 days<br/>into the rarity baseline
+    Coord->>Store: save daily_counts (if changed)
 
     Coord->>API: GET /detections?hours=24
     API-->>Coord: 24-hour detections list
@@ -56,7 +55,7 @@ sequenceDiagram
     Sensors->>HA: state and attributes updated
 ```
 
-Every call is made **sequentially** today — each `await` waits for the previous one. The yearly fetch and the `/detections` call could be parallelised with `asyncio.gather`; they aren't, because the Haikubox API's responsiveness has never made it worth the complexity.
+Every call is made **sequentially** today — each `await` waits for the previous one. The daily-count and `/detections` calls could be parallelised with `asyncio.gather`; they aren't, because the Haikubox API's responsiveness has never made it worth the complexity. Backfill requests are also deliberately spaced (a small `BACKFILL_REQUEST_DELAY` between them) so a fresh install doesn't burst the API.
 
 ## `GET /haikubox/<serial>` — device info
 
@@ -87,7 +86,7 @@ The response passes through `_normalise_detections` ([coordinator.py](../custom_
 | `spCode` | `sp_code` |
 | `dt` | `last_seen` (ISO 8601) |
 
-Records are sorted by `last_seen` descending. Rarity scores (`rarity_score`, `yearly_rank`) are then layered on by `_apply_rarity_scores` against the cached yearly baseline.
+Records are sorted by `last_seen` descending. Rarity scores (`rarity_score`, `yearly_rank`) are then layered on by `_apply_rarity_scores` against the trailing-window rarity baseline (see below).
 
 ### Deriving the recent window
 
@@ -98,31 +97,29 @@ The integration's clock and the API's `dt` timestamps both live in UTC; the filt
 | Sensor / pipeline | Window source |
 |---|---|
 | `recent_detections`, sticky updates (live), recent-window new-species tracker | Recent subset (client-side filter, 1 h) |
-| `daily_count`, `daily_top_species`, `notable_species`, **7-day store**, fresh-install bootstraps (sticky + `_seen_species`) | Full 24-hour normalisation |
+| `daily_count`, `daily_top_species`, `notable_species`, today's contribution to `rarest_species`, fresh-install bootstraps (sticky + `_seen_species`) | Full 24-hour normalisation |
 | `last_detection.detections` (per-event log) | Full 24-hour raw payload (sorted by `dt` desc, top 50) |
 | `new_species.detections` (lifetime history) | `_seen_species` log (sticky across polls and restarts) |
 
 ### Polling cost
 
-One `/detections` call per poll, every 10 minutes → **144 detection calls per box per day**, plus the daily yearly-count fetch and per-species image fetches (write-once). Comfortably within any sensible rate budget.
+One `/detections` call per poll, every 10 minutes → **144 detection calls per box per day**, plus roughly **one `/daily-count` fetch per day** in steady state (the newly-completed day), and per-species image fetches (write-once). On a *fresh* install there's also a one-time historical backfill — `RARITY_BACKFILL_CHUNK` (30) days per poll while the trailing year is still being covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for older history — each request spaced by `BACKFILL_REQUEST_DELAY` and walking back to the box's install date. It spreads over an hour or two for the rarity-relevant year, longer for the deep tail, rather than firing in one burst. Comfortably within any sensible rate budget.
 
-## `GET /haikubox/<serial>/yearly-count` — yearly baseline
+## `GET /haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` — rarity baseline
 
-**Where:** [`coordinator.py:_fetch_yearly_count`](../custom_components/haikubox/coordinator.py)
+**Where:** [`coordinator.py:_fetch_daily_count`](../custom_components/haikubox/coordinator.py), driven by `_ensure_daily_counts`
 
-Returns the full per-species count for the current calendar year as a flat list. The coordinator calls this at most **once per calendar day**, gated by:
+Returns one calendar day's per-species counts as a flat list (`[{bird, count}]`). Crucially it accepts an arbitrary **historical** `date`, which lets the integration build its **own rolling rarity baseline** instead of relying on the calendar-year `/yearly-count` endpoint. A calendar-year baseline resets every Jan 1 (rarity inflates and `notable`/`rarest` churn) and drifts within the year as its denominator grows; a self-built trailing window has neither problem.
 
-```python
-if self._yearly_fetched_date != today:
-    ...
-    self._yearly_fetched_date = today
-```
+**The store.** Per-day counts accumulate in `.storage/haikubox.<serial>.daily_counts` as `{ "YYYY-MM-DD": { species: count } }`, **completed days only**, kept for the box's full lifetime (a reusable dataset). Each poll, `_ensure_daily_counts`:
 
-After fetching, `_process_yearly_count` ([coordinator.py:425](../custom_components/haikubox/coordinator.py)) sorts by count descending and stamps each species with a 1-based `rank`. The resulting `{species → rank}` map is what rarity scoring divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `yearly_species_count / yearly_species_count = 1.0` (capped, tied with the rarest known species rather than overshooting it).
+1. **Forward-fills** any newly-completed day(s) since the last run (newest-first, until it reaches data it already has).
+2. **Backfills** older history toward the install date — `RARITY_BACKFILL_CHUNK` (30) days per poll until the trailing `RARITY_WINDOW_DAYS` is covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for the deep-history tail — each spaced by `BACKFILL_REQUEST_DELAY`. A `404` means "before the box existed" — after `BACKFILL_STOP_AFTER_404` (3) consecutive 404s the backfill is marked complete.
+3. Persists once if anything changed (a `try/finally` ensures partial progress survives a mid-chunk failure or restart) — ~1 write/day in steady state.
 
-The yearly list is persisted to `.storage/haikubox.<serial>.yearly` so the rank lookup survives HA restarts. If the API is unreachable at restart, the persisted list rehydrates `_yearly_ranks` and `_yearly_species_count` in [`_load_stores`](../custom_components/haikubox/coordinator.py) — rarity scoring keeps working with stale-but-usable data.
+**Scoring.** `_rebuild_baseline` aggregates the trailing **`RARITY_WINDOW_DAYS`** (365) of stored counts into a `{species → rank}` map via `_ranks_from_counts`. That's what rarity divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `1.0` (capped, tied with the rarest known species). Because it's a sliding window, the same species' rarity stays stable across a calendar year-end instead of jumping.
 
-If the API call fails inside a routine poll and a cached baseline exists (the steady-state case), the integration logs a warning and proceeds with the cached data. If the fetch fails *and* there is no cached baseline — the only realistic path is a true fresh install whose very first `/yearly-count` request errored — the poll raises `UpdateFailed` so sensors are honestly `unavailable` rather than serving rankings computed against an empty baseline. HA retries the coordinator's first refresh automatically; subsequent polls self-heal as soon as the endpoint is reachable.
+**Resilience.** The store rehydrates `_daily_counts` in [`_load_stores`](../custom_components/haikubox/coordinator.py) and the baseline is rebuilt at load, so rarity works immediately on restart from cached history. A `404`/empty body is "no data for that day" (never an error). A `429`/5xx during backfill is captured: backfill pauses until the next poll (~10 min — a natural backoff) and the 404 floor is **not** advanced, so a transient limit can't be mistaken for the install boundary. Only a true fresh install whose very first backfill found no data raises `UpdateFailed` (sensors `unavailable` until HA's automatic retry succeeds).
 
 ## Image CDN
 
@@ -158,8 +155,10 @@ The user can override the cadence through HA's standard "Enable polling for upda
 | Failure | Behaviour |
 |---|---|
 | `/detections` raises `aiohttp.ClientError` | `_async_update_data` raises `UpdateFailed`; HA marks sensors `unavailable` until the next successful poll |
-| `/yearly-count` raises `aiohttp.ClientError`, cached baseline available | Warning logged; poll proceeds with the previously-cached yearly baseline |
-| `/yearly-count` not yet cached AND endpoint fails | `UpdateFailed` raised — sensors `unavailable` until the next poll succeeds. HA retries automatically on a fresh install's first refresh |
+| `/daily-count` returns `404` | Treated as "no data for that day" / the pre-install floor — never an error |
+| `/daily-count` returns `429` or 5xx during backfill | Captured: backfill pauses until the next poll (natural backoff), partial progress persisted, the 404 floor is **not** advanced |
+| `/daily-count` connection error during backfill, cached history available | Warning logged; baseline rebuilt from cached history; backfill retried next poll |
+| No cached daily history AND the first backfill finds nothing | `UpdateFailed` raised — sensors `unavailable` until the next poll succeeds. HA retries automatically on a fresh install's first refresh |
 | Image S3 fetch returns non-200 | Card falls back to the remote S3 URL; next poll retries the cache write |
 | Image S3 fetch raises | Same — remote URL returned; failure is logged at DEBUG |
 | `/haikubox/<serial>` (device info) returns non-200 | Config flow surfaces `cannot_connect`; entry is not created |

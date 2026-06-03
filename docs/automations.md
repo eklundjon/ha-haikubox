@@ -68,7 +68,7 @@ Event data:
 | `sp_code` | eBird species code. |
 | `image_url` | Photo URL for the species (may be absent). |
 | `last_seen` | Timestamp of this detection. |
-| `rarity_score` | Rarity vs. the box's yearly baseline. |
+| `rarity_score` | Rarity vs. the box's rolling 12-month baseline. |
 | `yearly_rank` | Rank within the calendar-year baseline. |
 | `days_absent` | **`unusual_visitor` only** — days since the previous sighting. |
 

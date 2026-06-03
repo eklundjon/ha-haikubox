@@ -135,7 +135,7 @@ A ranked species list with tap-to-expand detail rows. Works with **any** list-be
 ```yaml
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_yearly_top_species
-title: Top Species This Calendar Year   # optional; blank or omitted → entity friendly name
+title: Top Species (Last 12 Months)   # optional; blank or omitted → entity friendly name
 top: 10                        # max items to render (default: 10)
 row_size: small                # small | medium | large (default: small)
 show_ebird: false              # eBird links in compact view (default: false)
@@ -176,10 +176,10 @@ show_allaboutbirds: true    # All About Birds button on the compact row too
 Point it at any list-bearing sensor:
 
 ```yaml
-# Top species (this calendar year)
+# Top species (last 12 months)
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_yearly_top_species
-title: Top Species This Calendar Year
+title: Top Species (Last 12 Months)
 top: 20
 grid_options:
   columns: 12
@@ -218,7 +218,7 @@ sections:
     cards:
       - type: custom:haikubox-bird-list-card
         entity: sensor.bird_shazam_yearly_top_species
-        title: Top Species This Calendar Year
+        title: Top Species (Last 12 Months)
         top: 20
   - type: grid
     cards:

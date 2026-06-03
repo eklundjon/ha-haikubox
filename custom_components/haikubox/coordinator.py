@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -15,6 +16,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     API_BASE,
+    BACKFILL_REQUEST_DELAY,
+    BACKFILL_STOP_AFTER_404,
     CONF_ABSENCE_DAYS,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
@@ -25,10 +28,13 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     EVENT_HAIKUBOX,
+    HISTORY_BACKFILL_CHUNK,
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
     NEW_SPECIES_HISTORY_LIMIT,
     NOTABILITY_WINDOW_HOURS,
+    RARITY_BACKFILL_CHUNK,
+    RARITY_WINDOW_DAYS,
     RECENT_WINDOW_HOURS,
     TRIGGER_NEW_SPECIES,
     TRIGGER_UNUSUAL_VISITOR,
@@ -75,8 +81,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sp_codes_store   = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sp_codes")
         self._sci_names_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sci_names")
         self._last_seen_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_seen")
-        self._yearly_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.yearly")
-        self._seven_day_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.seven_day")
+        self._daily_store      = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.daily_counts")
         self._sticky_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sticky")
 
         # In-memory store state
@@ -84,8 +89,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sp_codes: dict[str, str] = {}              # species → sp_code
         self._sci_names: dict[str, str] = {}             # species → scientific_name
         self._last_seen: dict[str, str] = {}             # species → last_seen ISO
-        self._yearly_items: list[dict[str, Any]] = []    # [{species, count, rank}]
-        self._seven_day_data: dict[str, list] = {}       # date_str → [species records]
+        self._yearly_items: list[dict[str, Any]] = []    # trailing-window baseline [{species, count, rank}]
+        self._daily_counts: dict[str, dict[str, int]] = {}  # date_str → {species: count}, full lifetime
+        self._backfill_complete: bool = False            # reached the pre-install 404 floor
+        self._backfill_cursor: str | None = None         # oldest date the deep backfill has probed
+        self._backfill_misses: int = 0                   # consecutive 404s at the leading (oldest) edge
         self._stores_loaded: bool = False
 
         # Automation-event edge detection. Species present in the recent
@@ -112,31 +120,26 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (issue #16).
         today = datetime.now(timezone.utc).date()
 
-        # Refresh yearly baseline once per calendar day
-        if self._yearly_fetched_date != today:
-            try:
-                yearly_raw = await self._fetch_yearly_count()
-                self._yearly_ranks, self._yearly_species_count, self._yearly_items = (
-                    _process_yearly_count(yearly_raw)
-                )
-                self._yearly_fetched_date = today
-                await self._yearly_store.async_save(self._yearly_items)
-            except aiohttp.ClientError as err:
-                _LOGGER.warning("Could not fetch yearly counts: %s", err)
+        # Keep the per-day counts store fresh (fetch newly-completed days +
+        # a throttled chunk of historical backfill), then rebuild the rarity
+        # baseline by aggregating the trailing RARITY_WINDOW_DAYS. This slides
+        # continuously, so it never resets on Jan 1 the way /yearly-count did.
+        try:
+            await self._ensure_daily_counts(today)
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Could not fetch daily counts: %s", err)
+        self._rebuild_baseline(today)
 
-        # If we still have no yearly baseline, every rarity_score would
-        # collapse to 1.0 and notable_species / rarest_species would lose
-        # their meaning. Fail the update loudly instead of computing
-        # silently-wrong rankings. The only path here is a true fresh
-        # install whose very first /yearly-count fetch failed; any
-        # prior-poll success rehydrates _yearly_ranks from .storage at
-        # load time. HA retries the coordinator's first refresh
-        # automatically, so this self-heals as soon as the API is back
-        # (issue #18).
+        # If we still have no baseline, every rarity_score would collapse to
+        # 1.0 and notable_species / rarest_species would lose their meaning.
+        # Fail loudly instead of computing silently-wrong rankings. Only a true
+        # fresh install whose first /daily-count fetch failed reaches here; any
+        # prior success rehydrates _daily_counts from .storage at load time, and
+        # HA retries the first refresh automatically, so this self-heals.
         if not self._yearly_ranks:
             raise UpdateFailed(
-                "Yearly baseline not yet available — /yearly-count fetch failed "
-                "on first poll and there is no cached baseline"
+                "Rarity baseline not yet available — /daily-count backfill has "
+                "no data yet and there is no cached history"
             )
 
         try:
@@ -271,13 +274,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if seen_dirty:
             await self._store.async_save(self._seen_species)
 
-        # Update 7-day rolling store with today's detections. Feed in the
-        # 24h-normalised list, not the 1h recent subset, so a species heard
-        # once outside the recent window still refreshes today's bucket on
-        # this poll (issue #15). Within-day dedup by species is handled by
-        # _update_seven_day's today_map; rarity scores are identical on both
-        # lists (both have had _apply_rarity_scores called on them).
-        seven_day_rare = await self._update_seven_day(daily_count, today)
+        # rarest_species: species heard in the last 7 days, scored by the
+        # trailing-window rarity baseline. The 7-day set comes from the
+        # persisted daily_counts (completed days) plus today's live 24h list
+        # (so today counts before it's a completed day in the store).
+        seven_day_rare = self._build_rarest(daily_count, today)
 
         sticky_dirty = False
         if detections:
@@ -351,7 +352,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Every list the sensors expose carries a 1-based `rank` reflecting
         # that sensor's own ordering criterion. Each list is sorted by its
         # criterion, then _ranked() stamps the position. (yearly_top_species
-        # already carries its yearly rank from _process_yearly_count.)
+        # already carries its rank from the baseline aggregate.)
 
         # Per-event list for last_detection.detections — distinct from the
         # per-species `detections` lists every other sensor exposes (same
@@ -485,16 +486,27 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sp_codes  = await self._sp_codes_store.async_load()
         sci_names = await self._sci_names_store.async_load()
         last_seen = await self._last_seen_store.async_load()
-        yearly    = await self._yearly_store.async_load()
-        seven_day = await self._seven_day_store.async_load()
+        daily     = await self._daily_store.async_load()
         sticky    = await self._sticky_store.async_load()
 
         self._seen_species   = seen      if isinstance(seen, dict)      else {}
         self._sp_codes       = sp_codes  if isinstance(sp_codes, dict)  else {}
         self._sci_names      = sci_names if isinstance(sci_names, dict) else {}
         self._last_seen      = last_seen if isinstance(last_seen, dict) else {}
-        self._yearly_items   = yearly    if isinstance(yearly, list)    else []
-        self._seven_day_data = seven_day if isinstance(seven_day, dict) else {}
+        if isinstance(daily, dict):
+            # Sanitize on load: a corrupt/hand-edited store should rebuild via
+            # backfill, not crash _rebuild_baseline on every poll.
+            self._daily_counts = _sanitize_daily_counts(daily.get("days"))
+            self._backfill_complete = bool(daily.get("backfill_complete"))
+            cursor = daily.get("cursor")
+            self._backfill_cursor = cursor if isinstance(cursor, str) else None
+            misses = daily.get("misses")
+            self._backfill_misses = misses if isinstance(misses, int) and misses >= 0 else 0
+        else:
+            self._daily_counts = {}
+            self._backfill_complete = False
+            self._backfill_cursor = None
+            self._backfill_misses = 0
 
         # Rehydrate the sticky records so last_detection / notable_species
         # show their last value immediately after a restart instead of
@@ -507,96 +519,164 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(ln, dict):
                 self._last_notable = ln
 
-        # Rehydrate the rank lookup from the persisted yearly list. Without
-        # this, _yearly_ranks/_yearly_species_count stay empty after a restart until
-        # the once-per-day yearly API fetch succeeds — so if that endpoint is
-        # down at restart, every species would score rarity 1.0 even though
-        # the data needed to score them is sitting in the store.
-        self._yearly_ranks = {
-            item["species"]: item["rank"]
-            for item in self._yearly_items
-            if isinstance(item, dict) and item.get("species") and item.get("rank")
-        }
-        self._yearly_species_count = len(self._yearly_ranks)
+        # Rebuild the rarity baseline from the persisted daily counts so
+        # rarity is available immediately on restart, before the first poll's
+        # daily-count fetch. No-op-safe when the store is empty.
+        self._rebuild_baseline(datetime.now(timezone.utc).date())
+
+        # One-time cleanup of the legacy stores that earlier versions wrote.
+        # The trailing-window baseline supersedes both, so they're orphaned;
+        # async_remove no-ops if a file is already gone. Runs once per session
+        # (this method is gated by _stores_loaded).
+        for legacy in ("yearly", "seven_day"):
+            await Store(
+                self.hass, _STORE_VERSION, f"{DOMAIN}.{self.serial}.{legacy}"
+            ).async_remove()
 
         await self._images.async_init()
 
         self._stores_loaded = True
 
-    async def _update_seven_day(
-        self, detections: list[dict[str, Any]], today: date
-    ) -> list[dict[str, Any]]:
-        """Merge today's detections into the rolling 7-day store.
+    async def _ensure_daily_counts(self, today: date) -> None:
+        """Keep _daily_counts current and gap-free, then extend history.
 
-        Returns the merged list of unique species across 7 days, sorted by
-        rarity_score descending.
+        Two phases per poll share one throttled budget:
+
+          1. **Fill gaps** in `[oldest known … yesterday]`, newest-first. This
+             covers newly-completed days *and* repairs holes left by HA /
+             internet downtime. A 404 or empty result *in range* is stored as
+             `{}` ("checked, no data") so it isn't re-fetched and contributes 0.
+          2. **Extend older** than the oldest known day (deep backfill) via a
+             persisted cursor, stopping at the pre-install floor. Only 404s
+             *here* count toward the floor (`_backfill_misses`, persisted across
+             polls); an empty day resets the count and a real-data day records.
+
+        Because the cursor advances regardless of result, a 404-gap larger than
+        one poll's budget never stalls the walk; because gaps inside the known
+        range are handled in phase 1, they can't be mistaken for the floor.
+
+        Budget is two-tier (fast while the rarity window isn't covered, then
+        gentle for the deep tail). A `try/finally` persists partial progress so
+        a mid-chunk failure or restart never wastes work; the backfill resumes
+        from the stored watermark.
         """
-        today_str = today.isoformat()
-        today_map: dict[str, dict] = {
-            item["species"]: item
-            for item in self._seven_day_data.get(today_str, [])
-        }
+        yesterday = today - timedelta(days=1)
+        window_floor = (today - timedelta(days=RARITY_WINDOW_DAYS)).isoformat()
+        window_covered = self._backfill_complete or (
+            bool(self._daily_counts) and min(self._daily_counts) <= window_floor
+        )
+        budget = HISTORY_BACKFILL_CHUNK if window_covered else RARITY_BACKFILL_CHUNK
+        changed = False
+        try:
+            # Phase 1 — fill gaps in [oldest known .. yesterday], newest-first.
+            range_start = (
+                date.fromisoformat(min(self._daily_counts))
+                if self._daily_counts
+                else yesterday
+            )
+            d = yesterday
+            while budget > 0 and d >= range_start:
+                ds = d.isoformat()
+                if ds not in self._daily_counts:
+                    res = await self._fetch_daily_count(ds)
+                    budget -= 1
+                    self._daily_counts[ds] = res if res is not None else {}
+                    changed = True
+                    await asyncio.sleep(BACKFILL_REQUEST_DELAY)
+                d -= timedelta(days=1)
 
-        # Persisted records intentionally omit image_url — that field is
-        # cache-state-dependent (`/local/...` is only valid while the
-        # JPEG sits in /config/www/haikubox/), so writing a snapshot of
-        # it could leave stale records pointing at deleted files after a
-        # cache wipe. The image URL is re-derived on output via
-        # _images.url_for(sp_code), which falls back to the remote CDN if
-        # the file isn't in the cache (issue #19 item H).
-        dirty = False
-        for d in detections:
-            sp = d["species"]
-            existing = today_map.get(sp)
-            if existing is None or d.get("rarity_score", 0) >= existing.get("rarity_score", 0):
-                today_map[sp] = {
-                    "species": sp,
-                    "sp_code": d.get("sp_code", ""),
-                    "scientific_name": d.get("scientific_name", ""),
-                    "rarity_score": d.get("rarity_score", 0.0),
-                    "yearly_rank": d.get("yearly_rank", 0),
-                    "count": d.get("count", 0),
-                    "last_seen": d.get("last_seen"),
-                }
-                dirty = True
+            # Phase 2 — extend older than the oldest known day, via the cursor.
+            if not self._backfill_complete and budget > 0:
+                if self._backfill_cursor is not None:
+                    cur = date.fromisoformat(self._backfill_cursor) - timedelta(days=1)
+                elif self._daily_counts:
+                    cur = date.fromisoformat(min(self._daily_counts)) - timedelta(days=1)
+                else:
+                    cur = yesterday  # nothing known yet (phase 1 found no data)
+                while budget > 0 and self._backfill_misses < BACKFILL_STOP_AFTER_404:
+                    res = await self._fetch_daily_count(cur.isoformat())
+                    budget -= 1
+                    if res is None:                       # 404 → pre-install (or a 404 gap)
+                        self._backfill_misses += 1
+                    else:                                  # {} or data → the day exists
+                        self._daily_counts[cur.isoformat()] = res
+                        self._backfill_misses = 0
+                    self._backfill_cursor = cur.isoformat()
+                    changed = True
+                    await asyncio.sleep(BACKFILL_REQUEST_DELAY)
+                    cur -= timedelta(days=1)
+                if self._backfill_misses >= BACKFILL_STOP_AFTER_404:
+                    self._backfill_complete = True
+        except aiohttp.ClientResponseError as err:
+            # Unexpected HTTP status (e.g. 429 rate limit, 5xx). Pause the
+            # backfill for this poll and keep whatever we fetched; the next
+            # poll (~10 min later) resumes — a natural backoff. The floor count
+            # is untouched, so a transient limit can't end the backfill early.
+            _LOGGER.warning(
+                "daily-count returned HTTP %s (%s) — pausing backfill until next poll",
+                err.status, err.message,
+            )
+        finally:
+            if changed:
+                await self._daily_store.async_save(
+                    {
+                        "days": self._daily_counts,
+                        "backfill_complete": self._backfill_complete,
+                        "cursor": self._backfill_cursor,
+                        "misses": self._backfill_misses,
+                    }
+                )
 
-        self._seven_day_data[today_str] = list(today_map.values())
+    def _rebuild_baseline(self, today: date) -> None:
+        """Aggregate the trailing RARITY_WINDOW_DAYS of daily counts into the
+        rarity baseline (species → rank). Replaces the calendar-year fetch;
+        cheap enough to run every poll."""
+        cutoff = (today - timedelta(days=RARITY_WINDOW_DAYS)).isoformat()
+        totals: dict[str, int] = {}
+        for date_str, counts in self._daily_counts.items():
+            if date_str >= cutoff:  # ISO dates compare lexicographically
+                for sp, c in counts.items():
+                    totals[sp] = totals.get(sp, 0) + int(c)
+        self._yearly_ranks, self._yearly_species_count, self._yearly_items = (
+            _ranks_from_counts(totals)
+        )
+        self._yearly_fetched_date = today
 
-        # Prune days older than 7
-        cutoff = (today - timedelta(days=7)).isoformat()
-        stale = [k for k in self._seven_day_data if k < cutoff]
-        for k in stale:
-            del self._seven_day_data[k]
-            dirty = True
+    def _build_rarest(
+        self, daily_count: list[dict[str, Any]], today: date
+    ) -> list[dict[str, Any]]:
+        """Species heard in the last 7 days, scored by the trailing-window
+        rarity baseline, rarest first. The 7-day set is the persisted completed
+        days plus today's live 24h list (so today counts before it lands in the
+        store as a completed day)."""
+        cutoff = (today - timedelta(days=6)).isoformat()  # 7 days incl. today
+        counts7: dict[str, int] = {}
+        for date_str, counts in self._daily_counts.items():
+            if date_str >= cutoff:
+                for sp, c in counts.items():
+                    counts7[sp] = counts7.get(sp, 0) + int(c)
+        for d in daily_count:
+            sp = d.get("species")
+            if sp:
+                counts7[sp] = counts7.get(sp, 0) + int(d.get("count", 0))
 
-        if dirty:
-            await self._seven_day_store.async_save(self._seven_day_data)
-
-        # Merge across all stored days: per species, keep highest
-        # rarity_score; tie goes to the newer day (issue #19, item D).
-        # `>=` matches the within-day rule above so tie-breaking is
-        # consistent in both axes — "newest wins" — and a tied newer
-        # record carries its own last_seen forward instead of needing
-        # the old elif-patch to copy the timestamp across.
-        # dict.values() iterates in insertion order; older days were
-        # inserted first (via _load_stores' rehydration order or via
-        # earlier polls), so the later iterations are the newer days.
-        merged: dict[str, dict] = {}
-        for day_items in self._seven_day_data.values():
-            for item in day_items:
-                sp = item["species"]
-                existing = merged.get(sp)
-                if existing is None or item.get("rarity_score", 0) >= existing.get("rarity_score", 0):
-                    merged[sp] = dict(item)
-
-        # Enrich each record with the current image URL — derived live
-        # via url_for so a wiped or rebuilt cache yields fresh paths
-        # rather than the stale ones that would have been pickled at
-        # write time (issue #19 item H).
-        ordered = sorted(merged.values(), key=lambda x: x.get("rarity_score", 0), reverse=True)
-        for rec in ordered:
-            rec["image_url"] = self._images.url_for(rec.get("sp_code", ""))
-        return ordered
+        denom = max(self._yearly_species_count, 1)
+        out: list[dict[str, Any]] = []
+        for sp, c in counts7.items():
+            sp_code = self._sp_codes.get(sp, "")
+            rank = self._yearly_ranks.get(sp, self._yearly_species_count)
+            out.append({
+                "species": sp,
+                "scientific_name": self._sci_names.get(sp, ""),
+                "sp_code": sp_code,
+                "image_url": self._images.url_for(sp_code),
+                "last_seen": self._last_seen.get(sp),
+                "count": c,
+                "rarity_score": round(rank / denom, 4),
+                "yearly_rank": rank,
+            })
+        out.sort(key=lambda x: x["rarity_score"], reverse=True)
+        return out
 
     # ------------------------------------------------------------------
     # Dataset builders (store-only, no API calls)
@@ -697,11 +777,32 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             resp.raise_for_status()
             return await resp.json()
 
-    async def _fetch_yearly_count(self) -> Any:
-        url = f"{API_BASE}/haikubox/{self.serial}/yearly-count"
-        async with self._session.get(url) as resp:
+    async def _fetch_daily_count(self, date_str: str) -> dict[str, int] | None:
+        """One calendar day's per-species counts as {species: count}.
+
+        Returns **None only for a 404** — a date before the box existed, the
+        backfill floor signal. A 200 with an empty or unparseable body returns
+        `{}` ("the day exists, just no data"), which the backfill treats as a
+        recorded no-data day rather than a floor hit. This distinction is what
+        lets an in-history outage gap (offline days) be told apart from the
+        pre-install void.
+        """
+        url = f"{API_BASE}/haikubox/{self.serial}/daily-count"
+        async with self._session.get(url, params={"date": date_str}) as resp:
+            if resp.status == 404:
+                return None
             resp.raise_for_status()
-            return await resp.json()
+            try:
+                data = await resp.json(content_type=None)
+            except (aiohttp.ContentTypeError, ValueError):
+                return {}
+        if not isinstance(data, list):
+            return {}
+        out: dict[str, int] = {}
+        for item in data:
+            if isinstance(item, dict) and item.get("bird"):
+                out[item["bird"]] = int(item.get("count") or 0)
+        return out
 
 
 # ------------------------------------------------------------------
@@ -847,34 +948,54 @@ def _first_seen_per_species(raw: Any) -> dict[str, str]:
     return out
 
 
-def _process_yearly_count(
-    raw: Any,
-) -> tuple[dict[str, int], int, list[dict[str, Any]]]:
-    """Return (species→rank, species_count, items_list) from the yearly-count
-    response. `species_count` is the number of distinct species in the
-    response (= the denominator used by rarity scoring), not a sum of
-    detection counts.
+def _sanitize_daily_counts(raw: Any) -> dict[str, dict[str, int]]:
+    """Validate a persisted daily-counts blob, dropping anything malformed.
 
-    items_list entries: {"species": str, "count": int, "rank": int}
+    Keeps only entries keyed by a valid ISO date whose value is a mapping of
+    species name (str) → integer count. A corrupt or hand-edited store thus
+    degrades to "rebuild via backfill" instead of crashing the rebuild/poll.
     """
-    if not isinstance(raw, list):
-        return {}, 0, []
+    if not isinstance(raw, dict):
+        return {}
+    clean: dict[str, dict[str, int]] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            date.fromisoformat(key)
+        except ValueError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        inner: dict[str, int] = {}
+        for sp, count in value.items():
+            if not isinstance(sp, str):
+                continue
+            try:
+                inner[sp] = int(count)
+            except (ValueError, TypeError):
+                continue
+        clean[key] = inner
+    return clean
 
-    sorted_items = sorted(
-        [item for item in raw if isinstance(item, dict)],
-        key=lambda x: int(x.get("count", 0)),
-        reverse=True,
-    )
+
+def _ranks_from_counts(
+    totals: dict[str, int],
+) -> tuple[dict[str, int], int, list[dict[str, Any]]]:
+    """Return (species→rank, species_count, items) from a {species: count}
+    aggregate (the trailing-window sum). `species_count` is the number of
+    distinct species — the denominator used by rarity scoring. items entries:
+    {"species": str, "count": int, "rank": int}, sorted by count descending.
+    """
+    sorted_items = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
     ranks: dict[str, int] = {}
     items: list[dict[str, Any]] = []
-    for idx, item in enumerate(sorted_items):
-        name = item.get("bird", "")
+    for idx, (name, count) in enumerate(sorted_items):
         if not name:
             continue
         rank = idx + 1
         ranks[name] = rank
-        items.append({"species": name, "count": int(item.get("count", 0)), "rank": rank})
-
+        items.append({"species": name, "count": int(count), "rank": rank})
     return ranks, len(ranks), items
 
 

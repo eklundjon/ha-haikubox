@@ -17,10 +17,10 @@ DEFAULT_SCAN_INTERVAL = 600  # 10 minutes
 # response with a timestamp filter.
 RECENT_WINDOW_HOURS = 1
 
-# Rolling window for the "daily" sensors. The Haikubox /daily-count
-# endpoint is a server-side calendar day; instead we derive a true
-# trailing 24-hour view from /detections (24 is the endpoint's max).
-# This is also the only window we actually fetch — see RECENT_WINDOW_HOURS.
+# Rolling window for the "daily" sensors. For these we want a true trailing
+# 24-hour view, so we derive it from /detections (24 is the endpoint's max)
+# rather than the server-side calendar-day /daily-count. (/daily-count is used
+# separately, by calendar day, to build the rarity baseline — see below.)
 DAILY_WINDOW_HOURS = 24
 
 # Cap on the per-event `detections` list exposed on the last_detection
@@ -56,6 +56,31 @@ EVENT_HAIKUBOX = "haikubox_event"
 TRIGGER_NEW_SPECIES = "new_species"          # first time ever on this box
 TRIGGER_UNUSUAL_VISITOR = "unusual_visitor"  # known species back after a long absence
 TRIGGER_TYPES = (TRIGGER_NEW_SPECIES, TRIGGER_UNUSUAL_VISITOR)
+
+# Rarity baseline. Instead of the calendar-year /yearly-count endpoint (which
+# resets every Jan 1 and drifts within the year), we persist per-day species
+# counts from /daily-count?date=<d> and aggregate a trailing window. The store
+# keeps full box-lifetime daily counts (a reusable dataset — trends, phenology,
+# true first-seen); rarity sums only the trailing RARITY_WINDOW_DAYS.
+RARITY_WINDOW_DAYS = 365
+# Throttle the one-time historical backfill so a fresh install doesn't hammer
+# the API. Two-tier (days fetched per poll, walking backward): fetch the
+# rarity-relevant trailing year quickly, then ease off for the deep-history
+# tail (which only feeds future trend features, not rarity scoring).
+RARITY_BACKFILL_CHUNK = 30   # while the trailing RARITY_WINDOW_DAYS isn't covered
+HISTORY_BACKFILL_CHUNK = 10  # once rarity is covered, for the remaining lifetime
+# Treat this many consecutive 404s (days that pre-date the box) while extending
+# older than all known data as the pre-install floor, and stop the deep
+# backfill. The count persists across polls and only the older-than-known
+# extension feeds it — gaps *inside* the known date range are recorded as empty
+# and never counted. Generous enough to walk through a realistic multi-day
+# outage and resume on real data beyond it. (The API gives no install date to
+# anchor to — see _ensure_daily_counts.)
+BACKFILL_STOP_AFTER_404 = 14
+# Politeness delay (seconds) between consecutive backfill requests, so a fresh
+# install's chunk of historical fetches doesn't burst the API and trip a rate
+# limit. On a 429/5xx we also pause backfill until the next poll (~10 min).
+BACKFILL_REQUEST_DELAY = 0.25
 
 # unusual_visitor fires when a known species reappears after at least this
 # many days unheard. Built on the persisted last-seen gap, so it's immune to

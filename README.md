@@ -4,16 +4,16 @@
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.12+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bird audio detection devices. Surfaces recent detections, daily and yearly species counts, and highlights unusual visitors — all with bird photos and custom Lovelace cards.
+A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bird audio detection devices. Surfaces recent detections, daily and rolling 12-month species counts, and highlights unusual visitors — all with bird photos and custom Lovelace cards.
 
 ## Features
 
 - **Recent detections** — species heard in the last hour, updated every 10 minutes
 - **Last detection** — persists the most recently heard bird, never goes unknown between detections
-- **Notable species** — top bird from the trailing 24 hours by a tunable blend of rarity (vs. your box's yearly baseline) and recency; the rarity ↔ recency weight is a slider in the integration's options
+- **Notable species** — top bird from the trailing 24 hours by a tunable blend of rarity (vs. your box's rolling 12-month baseline) and recency; the rarity ↔ recency weight is a slider in the integration's options
 - **New species** — flags species appearing for the first time ever on your box; lifetime log survives restarts
 - **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
-- **Bird details sensors** — top species this calendar year, top species (last 24 h), rarest species (7 d)
+- **Bird details sensors** — top species (last 12 months), top species (last 24 h), rarest species (7 d)
 - **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views
 - **Automations** — device triggers for new-species and unusual-visitor detections, plus blueprints for photo push notifications
 - Bird photos cached locally for offline resilience

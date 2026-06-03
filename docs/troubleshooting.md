@@ -24,8 +24,8 @@ Every poll fetches a 24-hour detection window from the Haikubox API, so most sen
 - `recent_detections` — populates on the first poll that returns any detections in the last hour. Empty between active hours.
 - `last_detection`, `notable_species`, `new_species` — bootstrap from the 24-hour window on the first poll, so they populate within ~10 minutes of install as long as your box has detected anything in the last 24 hours. (They stay sticky thereafter.)
 - `daily_top_species`, `daily_count` — populate on the first poll from the full 24-hour API response. The trailing window slides every poll; counts rise and fall as old detections age past 24h and new ones arrive.
-- `yearly_top_species` — populated by the yearly-baseline fetch on first setup, then refreshed once per calendar day (UTC).
-- `rarest_species` — full 7-day window only after the box has been running for 7 days; before then, the sensor returns whatever the partial window currently contains.
+- `yearly_top_species` — the top species over a rolling 12-month window, built from per-day `/daily-count` history. On a fresh install it starts from the first backfilled chunk, then fills in over the next hour or two as the historical backfill walks back (~30 days/poll until the trailing year is covered, then slower for older history — throttled to be kind to the API). Rarity-derived sensors (`notable_species`, `rarest_species`) sharpen as that window fills.
+- `rarest_species` — derived from the same per-day history; its 7-day window is available as soon as the backfill has fetched the last week (typically the first poll, which grabs ~30 days).
 - `lifetime_species_count` starts at the 24-hour bootstrap count and climbs as new species come in. Bootstrap-seeded species use their **earliest** dt in that first 24-hour window as `first_seen` (not the most recent — the real first observation we can see). Truly new species detected later get exact first-seen timestamps from their actual detection events.
 
 ## `last_detection` / `notable_species` are `unknown`
