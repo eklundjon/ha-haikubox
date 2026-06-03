@@ -514,6 +514,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # daily-count fetch. No-op-safe when the store is empty.
         self._rebuild_baseline(datetime.now(timezone.utc).date())
 
+        # One-time cleanup of the legacy stores that earlier versions wrote.
+        # The trailing-window baseline supersedes both, so they're orphaned;
+        # async_remove no-ops if a file is already gone. Runs once per session
+        # (this method is gated by _stores_loaded).
+        for legacy in ("yearly", "seven_day"):
+            await Store(
+                self.hass, _STORE_VERSION, f"{DOMAIN}.{self.serial}.{legacy}"
+            ).async_remove()
+
         await self._images.async_init()
 
         self._stores_loaded = True
