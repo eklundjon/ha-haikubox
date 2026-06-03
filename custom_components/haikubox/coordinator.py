@@ -35,6 +35,7 @@ from .const import (
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
     NEW_SPECIES_HISTORY_LIMIT,
+    NEW_SPECIES_WINDOW_DAYS,
     NOTABILITY_WINDOW_HOURS,
     RARITY_BACKFILL_CHUNK,
     RARITY_WINDOW_DAYS,
@@ -432,6 +433,20 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         latest_day = max(completed) if completed else None
         latest_day_total = completed[latest_day] if latest_day else None
 
+        # New-species momentum: how many species were first heard in the last
+        # NEW_SPECIES_WINDOW_DAYS, and days since the most recent lifetime
+        # first. first_seen values are ISO strings (date or datetime); compare
+        # on the YYYY-MM-DD prefix (lexicographic == chronological for ISO).
+        new_cutoff = (today - timedelta(days=NEW_SPECIES_WINDOW_DAYS)).isoformat()
+        first_seen_dates = [fs[:10] for fs in self._seen_species.values() if fs]
+        new_species_window = sum(1 for fs in first_seen_dates if fs >= new_cutoff)
+        days_since_new: int | None = None
+        if first_seen_dates:
+            try:
+                days_since_new = (today - date.fromisoformat(max(first_seen_dates))).days
+            except ValueError:
+                days_since_new = None
+
         return {
             # key == sensor id; the public list attribute is always
             # `detections`. Singular keys are sticky single records;
@@ -461,6 +476,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "typical_daily_count": typical_daily,             # mean active completed-day total
             "latest_day_total": latest_day_total,             # most recent completed day's total
             "latest_day_date": latest_day,                    # its date (ISO)
+            "new_species_window": new_species_window,         # first-seen in last N days
+            "days_since_new_species": days_since_new,         # since most recent lifetime-first
         }
 
     # ------------------------------------------------------------------

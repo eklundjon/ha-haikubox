@@ -37,6 +37,10 @@ LAST_DETECTION_EVENT_LIMIT = 50
 # Same soft attribute-size rationale as LAST_DETECTION_EVENT_LIMIT.
 NEW_SPECIES_HISTORY_LIMIT = 50
 
+# Trailing window for the "new species (N d)" momentum sensor — how many
+# species were first heard on this box within the last this-many days.
+NEW_SPECIES_WINDOW_DAYS = 30
+
 # Notable-species tuning. notability_score is a weighted blend of rarity
 # and recency: w * rarity_score + (1-w) * recency_score. The user-facing
 # option is "% weight toward rarity" (0-100); 100 = pure rarity (stable,

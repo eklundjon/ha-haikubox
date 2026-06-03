@@ -36,6 +36,7 @@ async def async_setup_entry(
             HaikuboxDetectionsTodaySensor(coordinator, serial),
             HaikuboxSpeciesDiversitySensor(coordinator, serial),
             HaikuboxActivitySensor(coordinator, serial),
+            HaikuboxNewSpeciesMomentumSensor(coordinator, serial),
         ]
     )
 
@@ -425,4 +426,34 @@ class HaikuboxActivitySensor(_HaikuboxSensor):
             "as_of_date": self.coordinator.data.get("latest_day_date"),
             "day_total": self.coordinator.data.get("latest_day_total"),
             "typical_daily_count": self.coordinator.data.get("typical_daily_count"),
+        }
+
+
+class HaikuboxNewSpeciesMomentumSensor(_HaikuboxSensor):
+    """How many species were first heard on this box in the last 30 days.
+
+    A "discovery momentum" counter — high while your life list is growing fast
+    (new install, spring migration), settling toward 0 once the box has heard
+    most local regulars. Exposes `days_since_new_species` (gap since the most
+    recent lifetime-first) as an attribute. Derived from the seen_species
+    first-seen log, independent of detection counts.
+    """
+
+    _attr_translation_key = "new_species_window"
+    _attr_icon = "mdi:trending-up"
+    _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_new_species_window"
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.data.get("new_species_window", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "days_since_new_species": self.coordinator.data.get("days_since_new_species"),
         }

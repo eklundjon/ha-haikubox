@@ -89,6 +89,9 @@
       },
       "activity_level": {
         "name": "Activity vs. typical"
+      },
+      "new_species_window": {
+        "name": "New species (30 d)"
       }
     },
     "binary_sensor": {
