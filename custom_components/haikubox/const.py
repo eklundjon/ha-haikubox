@@ -57,6 +57,24 @@ TRIGGER_NEW_SPECIES = "new_species"          # first time ever on this box
 TRIGGER_UNUSUAL_VISITOR = "unusual_visitor"  # known species back after a long absence
 TRIGGER_TYPES = (TRIGGER_NEW_SPECIES, TRIGGER_UNUSUAL_VISITOR)
 
+# Rarity baseline. Instead of the calendar-year /yearly-count endpoint (which
+# resets every Jan 1 and drifts within the year), we persist per-day species
+# counts from /daily-count?date=<d> and aggregate a trailing window. The store
+# keeps full box-lifetime daily counts (a reusable dataset — trends, phenology,
+# true first-seen); rarity sums only the trailing RARITY_WINDOW_DAYS.
+RARITY_WINDOW_DAYS = 365
+# Throttle the one-time historical backfill so a fresh install doesn't hammer
+# the API: fetch at most this many missing days per poll, walking backward.
+DAILY_BACKFILL_CHUNK = 15
+# Stop backfilling after this many consecutive 404s walking backward — that's
+# the box's pre-install floor (data is contiguous from the install date).
+# A small threshold tolerates an isolated offline day mid-history.
+BACKFILL_STOP_AFTER_404 = 3
+# Politeness delay (seconds) between consecutive backfill requests, so a fresh
+# install's chunk of historical fetches doesn't burst the API and trip a rate
+# limit. On a 429/5xx we also pause backfill until the next poll (~10 min).
+BACKFILL_REQUEST_DELAY = 0.25
+
 # unusual_visitor fires when a known species reappears after at least this
 # many days unheard. Built on the persisted last-seen gap, so it's immune to
 # the calendar-year reset that makes raw yearly rarity unreliable as an alert

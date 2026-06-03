@@ -73,7 +73,7 @@
         "name": "New species"
       },
       "yearly_top_species": {
-        "name": "Top species (this calendar year)"
+        "name": "Top species (last 12 months)"
       },
       "rarest_species": {
         "name": "Rarest species (7 d)"
