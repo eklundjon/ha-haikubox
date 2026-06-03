@@ -478,6 +478,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "latest_day_date": latest_day,                    # its date (ISO)
             "new_species_window": new_species_window,         # first-seen in last N days
             "days_since_new_species": days_since_new,         # since most recent lifetime-first
+            # Backfill coverage (diagnostic): how far back the daily-count
+            # history reaches, how many days are stored, and whether the
+            # backward backfill has reached the box's install floor.
+            "history_earliest": min(self._daily_counts) if self._daily_counts else None,
+            "history_days_recorded": len(self._daily_counts),
+            "history_complete": self._backfill_complete,
         }
 
     # ------------------------------------------------------------------

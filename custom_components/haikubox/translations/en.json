@@ -92,6 +92,9 @@
       },
       "new_species_window": {
         "name": "New species (30 d)"
+      },
+      "history_start": {
+        "name": "Detection history start"
       }
     },
     "binary_sensor": {

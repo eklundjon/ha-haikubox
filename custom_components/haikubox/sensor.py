@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import math
+from datetime import date, datetime, timezone
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -37,6 +43,7 @@ async def async_setup_entry(
             HaikuboxSpeciesDiversitySensor(coordinator, serial),
             HaikuboxActivitySensor(coordinator, serial),
             HaikuboxNewSpeciesMomentumSensor(coordinator, serial),
+            HaikuboxHistoryDepthSensor(coordinator, serial),
         ]
     )
 
@@ -456,4 +463,48 @@ class HaikuboxNewSpeciesMomentumSensor(_HaikuboxSensor):
     def extra_state_attributes(self) -> dict:
         return {
             "days_since_new_species": self.coordinator.data.get("days_since_new_species"),
+        }
+
+
+class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
+    """Diagnostic: how far back the per-day detection history reaches.
+
+    State is the earliest day we have `/daily-count` data for. On a fresh
+    install it walks backward each poll (the throttled backfill) until it
+    reaches the box's install date, then holds. Attributes report how many days
+    are stored, the calendar span, and whether the backfill is complete.
+    """
+
+    _attr_translation_key = "history_start"
+    _attr_icon = "mdi:history"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_history_start"
+
+    @property
+    def native_value(self) -> datetime | None:
+        earliest = self.coordinator.data.get("history_earliest")
+        if not earliest:
+            return None
+        try:
+            return datetime.fromisoformat(earliest).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        earliest = self.coordinator.data.get("history_earliest")
+        span = None
+        if earliest:
+            try:
+                span = (datetime.now(timezone.utc).date() - date.fromisoformat(earliest)).days
+            except ValueError:
+                span = None
+        return {
+            "days_recorded": self.coordinator.data.get("history_days_recorded", 0),
+            "days_span": span,
+            "backfill_complete": self.coordinator.data.get("history_complete", False),
         }
