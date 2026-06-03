@@ -75,6 +75,17 @@ Full card reference, including the ranked list card and `tap_action` configurati
 | Haikubox API endpoints, polling, image CDN, failure modes | [docs/api.md](docs/api.md) |
 | Module map, data flow, persistence, lifecycle, custom-card registration | [docs/architecture.md](docs/architecture.md) |
 
+## Attribution
+
+Bird species photos are served from the Haikubox image CDN. To resolve a
+photo for species that haven't appeared in the live detection sample, the
+integration bundles a derived `common name → species code` map from the
+**eBird/Clements Checklist v2025** (© Cornell Lab of Ornithology) — see
+[custom_components/haikubox/data/NOTICE.md](custom_components/haikubox/data/NOTICE.md)
+for the citation and terms. Non-commercial use.
+
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details. (The bundled eBird-derived
+data is covered by its own [NOTICE](custom_components/haikubox/data/NOTICE.md),
+not the MIT license.)
