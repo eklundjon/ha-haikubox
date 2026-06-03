@@ -458,8 +458,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_detection": self._last_detected,           # sticky
             "recent_events": _ranked(recent_events),         # per-event by dt desc
             "notable_detection": self._last_notable,         # sticky
-            "daily_count": daily_count,                      # 24h per-species — total only
-            "daily_top_species": _ranked(self._build_daily_list(daily_count)),  # by 24h count
+            # Capped (≤5/species) trailing-24h list from /detections. No longer
+            # the daily_count *sensor's* value (that's today_total now) — kept
+            # for the extended-silence emptiness check and rarest's "seen today"
+            # membership, both of which only need presence, not true counts.
+            "daily_count": daily_count,
+            "daily_top_species": _ranked(self._build_today_top(today_species)),  # true counts, today
             "notable_detections": _ranked(notable),          # by rarity
             # Sticky lifetime-history list (N most recently first-seen
             # species, newest first). Derived from _seen_species, not from
@@ -797,19 +801,32 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             })
         return result
 
-    def _build_daily_list(self, daily_count: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Today's species (count desc) enriched with sp_code, scientific_name, last_seen, image."""
-        result = []
-        for item in daily_count:
-            sp = item["species"]
+    def _build_today_top(self, today_species: dict[str, int]) -> list[dict[str, Any]]:
+        """Today's species ranked by TRUE detection count (from /daily-count),
+        enriched with sp_code, scientific_name, last_seen, image, and the
+        trailing-window rarity score.
+
+        Replaces the old /detections-derived list, whose per-species counts were
+        clamped at the ≤5-per-species sample cap — so its "top species" ranking
+        was meaningless ties at 5 (issue #44). This uses the true calendar-day
+        counts instead.
+        """
+        denom = max(self._yearly_species_count, 1)
+        result: list[dict[str, Any]] = []
+        for sp, count in today_species.items():
             sp_code = self._sp_code_for(sp)
+            rank = self._yearly_ranks.get(sp, self._yearly_species_count)
             result.append({
-                **item,
-                "sp_code": sp_code,
+                "species": sp,
                 "scientific_name": self._sci_names.get(sp, ""),
-                "last_seen": self._last_seen.get(sp),
+                "sp_code": sp_code,
                 "image_url": self._images.url_for(sp_code),
+                "last_seen": self._last_seen.get(sp),
+                "count": count,
+                "rarity_score": round(rank / denom, 4),
+                "yearly_rank": rank,
             })
+        result.sort(key=lambda x: x["count"], reverse=True)
         return result
 
     def _build_new_species_history(self) -> list[dict[str, Any]]:

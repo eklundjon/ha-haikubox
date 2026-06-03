@@ -39,7 +39,6 @@ async def async_setup_entry(
             HaikuboxYearlyTopSpeciesSensor(coordinator, serial),
             HaikuboxRarestSpeciesSensor(coordinator, serial),
             HaikuboxLifetimeSpeciesSensor(coordinator, serial),
-            HaikuboxDetectionsTodaySensor(coordinator, serial),
             HaikuboxSpeciesDiversitySensor(coordinator, serial),
             HaikuboxActivitySensor(coordinator, serial),
             HaikuboxNewSpeciesMomentumSensor(coordinator, serial),
@@ -133,26 +132,27 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
 
 
 class HaikuboxDailyCountSensor(_HaikuboxSensor):
-    """Total individual detections over the trailing 24 hours."""
+    """Total detections so far today — the box's true bird-traffic volume.
+
+    Sourced from /daily-count (true per-species counts), not the ≤5-per-species
+    /detections sample, so it reflects real volume (often thousands/day) rather
+    than the old clamped ~120 (issue #44). It's a partial calendar day that
+    grows through the day and resets at UTC midnight. (True *hourly* volume
+    isn't available from the API — the only accurate grain is the calendar day.)
+    """
 
     _attr_translation_key = "daily_count"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = "detections"
-    # Rolling 24h total: rises and falls as the window slides, so it is a
-    # MEASUREMENT, not a TOTAL_INCREASING counter (which would treat every
-    # decrease as a meter reset and corrupt long-term statistics).
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_daily_count"
 
-    # Pure total counter — the 24h species list lives on daily_top_species.
     @property
     def native_value(self) -> int:
-        return sum(
-            s.get("count", 0) for s in self.coordinator.data.get("daily_count", [])
-        )
+        return self.coordinator.data.get("today_total", 0)
 
 
 class HaikuboxDailyTopSpeciesSensor(_HaikuboxSensor):
@@ -331,30 +331,6 @@ class HaikuboxLifetimeSpeciesSensor(_HaikuboxSensor):
     @property
     def native_value(self) -> int:
         return self.coordinator.data.get("lifetime_species_count", 0)
-
-
-class HaikuboxDetectionsTodaySensor(_HaikuboxSensor):
-    """Total detections so far today — the box's true bird-traffic volume.
-
-    Sourced from /daily-count (true per-species counts), not the ≤5-per-species
-    /detections sample, so it reflects real volume (often thousands/day). It's
-    a partial calendar day that grows through the day and resets at UTC
-    midnight. (True *hourly* volume isn't available from the API — the only
-    accurate grain is the calendar day.)
-    """
-
-    _attr_translation_key = "detections_today"
-    _attr_icon = "mdi:chart-line"
-    _attr_native_unit_of_measurement = "detections"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
-        super().__init__(coordinator, serial)
-        self._attr_unique_id = f"{serial}_detections_today"
-
-    @property
-    def native_value(self) -> int:
-        return self.coordinator.data.get("today_total", 0)
 
 
 class HaikuboxSpeciesDiversitySensor(_HaikuboxSensor):

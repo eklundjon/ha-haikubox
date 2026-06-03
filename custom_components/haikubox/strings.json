@@ -61,10 +61,10 @@
         "name": "Last detection"
       },
       "daily_count": {
-        "name": "Total detections (24 h)"
+        "name": "Detections today"
       },
       "daily_top_species": {
-        "name": "Top species (24 h)"
+        "name": "Top species (today)"
       },
       "notable_species": {
         "name": "Notable species"
@@ -80,9 +80,6 @@
       },
       "lifetime_species": {
         "name": "Lifetime species"
-      },
-      "detections_today": {
-        "name": "Detections today"
       },
       "species_diversity": {
         "name": "Species diversity (today)"
