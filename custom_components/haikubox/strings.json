@@ -80,6 +80,9 @@
       },
       "lifetime_species": {
         "name": "Lifetime species"
+      },
+      "detections_today": {
+        "name": "Detections today"
       }
     },
     "binary_sensor": {

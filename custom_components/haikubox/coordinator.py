@@ -401,6 +401,18 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # poll's qualifying species, then advance the recent-window baseline.
         self._fire_detection_events(detections, newly_seen, prior_last_seen)
 
+        # Today's TRUE per-species counts. The /detections feed is only a
+        # ≤5-per-species recency sample, so daily *volume* and diversity must
+        # come from /daily-count (the same source as the rarity baseline).
+        # Today is a partial, still-accumulating calendar day; fetched fresh
+        # each poll. (See issue #44 re: daily_count's capped-feed undercount.)
+        try:
+            today_species = await self._fetch_daily_count(today.isoformat()) or {}
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Could not fetch today's daily count: %s", err)
+            today_species = {}
+        today_total = sum(today_species.values())
+
         return {
             # key == sensor id; the public list attribute is always
             # `detections`. Singular keys are sticky single records;
@@ -425,6 +437,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lifetime_species_count": len(self._seen_species),
             "yearly_top_species": self._build_yearly_top(),  # by yearly count (own rank)
             "rarest_species": _ranked(seven_day_rare),       # by rarity
+            "today_total": today_total,                       # true daily total (/daily-count)
+            "today_species": today_species,                   # true per-species map (diversity)
         }
 
     # ------------------------------------------------------------------
