@@ -1,10 +1,11 @@
 # Bundled data attribution — `ebird_species_codes.json`
 
-`ebird_species_codes.json` is a **derived** dataset: a transformed, two-column
-mapping of `common name → eBird species_code`, extracted from the eBird/Clements
-taxonomy. It is **not** the original checklist file. The integration uses it
-only to resolve a species' photo (the image CDN is keyed by species code) when
-that code wasn't already learned from the live Haikubox API.
+`ebird_species_codes.json` is a **derived** dataset: a transformed mapping of
+`common name → { eBird species_code, scientific name }`, extracted from the
+eBird/Clements taxonomy. It is **not** the original checklist file. The
+integration uses it only to resolve a species' photo (the image CDN is keyed by
+species code) and its scientific name when those weren't already learned from
+the live Haikubox API.
 
 ## Source & citation
 
@@ -29,7 +30,8 @@ Per the eBird/Clements terms of use:
   honor that request, should contact eBird.
 
 To refresh: download the current eBird Taxonomy CSV from the link above and
-regenerate the `common name → SPECIES_CODE` map for `CATEGORY == "species"`.
+regenerate the `common name → { SPECIES_CODE, SCI_NAME }` map for
+`CATEGORY == "species"`.
 
 ---
 

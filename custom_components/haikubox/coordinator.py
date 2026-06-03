@@ -54,32 +54,33 @@ _STORE_VERSION = 1
 type HaikuboxConfigEntry = ConfigEntry[HaikuboxCoordinator]
 
 
-# Bundled common-name → eBird species_code fallback map. Haikubox's sp_code is
-# the eBird species code, and the image S3 is keyed by it — but we only *learn*
-# a species' code from the /detections sample, which omits rarely-heard species.
-# This derived map (from the eBird/Clements taxonomy) lets daily-count-only
-# species still resolve an image. See data/ebird_species_codes.json + NOTICE.
+# Bundled common-name → {eBird species_code, scientific name} fallback map.
+# Haikubox's sp_code is the eBird species code (the image S3 is keyed by it),
+# but we only *learn* a species' code and scientific name from the /detections
+# sample, which omits rarely-heard species. This derived map (from the
+# eBird/Clements taxonomy) lets daily-count-only species still resolve an image
+# and a scientific name. See data/ebird_species_codes.json + NOTICE.
 #
-# Loaded once, off the event loop (it's ~350 KB of JSON), via
-# _async_load_ebird_codes; _sp_code_for reads the module-level cache.
-_EBIRD_CODES: dict[str, str] | None = None
+# Loaded once, off the event loop (~750 KB of JSON), via
+# _async_load_ebird_species; _sp_code_for / _sci_name_for read the cache.
+_EBIRD_SPECIES: dict[str, dict[str, str]] | None = None
 
 
-def _read_ebird_codes() -> dict[str, str]:
+def _read_ebird_species() -> dict[str, dict[str, str]]:
     """Blocking read+parse of the bundled map. Call only via the executor."""
     path = Path(__file__).parent / "data" / "ebird_species_codes.json"
     try:
         return json.loads(path.read_text(encoding="utf-8")).get("names", {})
     except (OSError, ValueError):
-        _LOGGER.warning("Could not load bundled eBird species-code map")
+        _LOGGER.warning("Could not load bundled eBird species map")
         return {}
 
 
-async def _async_load_ebird_codes(hass: HomeAssistant) -> None:
-    """Populate the module-level eBird-code cache once, off the event loop."""
-    global _EBIRD_CODES
-    if _EBIRD_CODES is None:
-        _EBIRD_CODES = await hass.async_add_executor_job(_read_ebird_codes)
+async def _async_load_ebird_species(hass: HomeAssistant) -> None:
+    """Populate the module-level eBird species cache once, off the event loop."""
+    global _EBIRD_SPECIES
+    if _EBIRD_SPECIES is None:
+        _EBIRD_SPECIES = await hass.async_add_executor_job(_read_ebird_species)
 
 
 class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -645,7 +646,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Preload the bundled eBird-code fallback map off the event loop, so
         # the synchronous _sp_code_for() lookups during a poll never touch disk.
-        await _async_load_ebird_codes(self.hass)
+        await _async_load_ebird_species(self.hass)
 
         self._stores_loaded = True
 
@@ -779,7 +780,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             rank = self._yearly_ranks.get(sp, self._yearly_species_count)
             out.append({
                 "species": sp,
-                "scientific_name": self._sci_names.get(sp, ""),
+                "scientific_name": self._sci_name_for(sp),
                 "sp_code": sp_code,
                 "image_url": self._images.url_for(sp_code),
                 "last_seen": self._last_seen.get(sp),
@@ -799,7 +800,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else fall back to the bundled eBird map. The fallback lets species seen
         only via /daily-count (e.g. rare birds the /detections sample misses)
         still get an image. Empty string when truly unknown."""
-        return self._sp_codes.get(species) or (_EBIRD_CODES or {}).get(species, "")
+        return self._sp_codes.get(species) or (_EBIRD_SPECIES or {}).get(species, {}).get("code", "")
+
+    def _sci_name_for(self, species: str) -> str:
+        """Resolve a species' scientific name: prefer what we learned from
+        /detections, else fall back to the bundled eBird map (so daily-count-only
+        species still show a scientific name). Empty string when unknown."""
+        return self._sci_names.get(species) or (_EBIRD_SPECIES or {}).get(species, {}).get("sci", "")
 
     def _build_yearly_top(self) -> list[dict[str, Any]]:
         """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
@@ -810,7 +817,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result.append({
                 **item,
                 "sp_code": sp_code,
-                "scientific_name": self._sci_names.get(sp, ""),
+                "scientific_name": self._sci_name_for(sp),
                 "last_seen": self._last_seen.get(sp),
                 "image_url": self._images.url_for(sp_code),
             })
@@ -833,7 +840,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             rank = self._yearly_ranks.get(sp, self._yearly_species_count)
             result.append({
                 "species": sp,
-                "scientific_name": self._sci_names.get(sp, ""),
+                "scientific_name": self._sci_name_for(sp),
                 "sp_code": sp_code,
                 "image_url": self._images.url_for(sp_code),
                 "last_seen": self._last_seen.get(sp),
@@ -867,7 +874,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             rank = self._yearly_ranks.get(species, self._yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
-                "scientific_name": self._sci_names.get(species, ""),
+                "scientific_name": self._sci_name_for(species),
                 "sp_code": sp_code,
                 "image_url": self._images.url_for(sp_code),
                 "last_seen": self._last_seen.get(species),
