@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -53,22 +52,32 @@ _STORE_VERSION = 1
 type HaikuboxConfigEntry = ConfigEntry[HaikuboxCoordinator]
 
 
-@lru_cache(maxsize=1)
-def _ebird_codes() -> dict[str, str]:
-    """Bundled common-name → eBird species_code fallback map (lazy-loaded once).
+# Bundled common-name → eBird species_code fallback map. Haikubox's sp_code is
+# the eBird species code, and the image S3 is keyed by it — but we only *learn*
+# a species' code from the /detections sample, which omits rarely-heard species.
+# This derived map (from the eBird/Clements taxonomy) lets daily-count-only
+# species still resolve an image. See data/ebird_species_codes.json + NOTICE.
+#
+# Loaded once, off the event loop (it's ~350 KB of JSON), via
+# _async_load_ebird_codes; _sp_code_for reads the module-level cache.
+_EBIRD_CODES: dict[str, str] | None = None
 
-    Haikubox's sp_code is the eBird species code, and the image S3 is keyed by
-    it — but we only *learn* a species' code from the /detections sample, which
-    omits rarely-heard species. This derived map (from the eBird/Clements
-    taxonomy) lets daily-count-only species still resolve an image. See
-    data/ebird_species_codes.json and its NOTICE.
-    """
+
+def _read_ebird_codes() -> dict[str, str]:
+    """Blocking read+parse of the bundled map. Call only via the executor."""
     path = Path(__file__).parent / "data" / "ebird_species_codes.json"
     try:
         return json.loads(path.read_text(encoding="utf-8")).get("names", {})
     except (OSError, ValueError):
         _LOGGER.warning("Could not load bundled eBird species-code map")
         return {}
+
+
+async def _async_load_ebird_codes(hass: HomeAssistant) -> None:
+    """Populate the module-level eBird-code cache once, off the event loop."""
+    global _EBIRD_CODES
+    if _EBIRD_CODES is None:
+        _EBIRD_CODES = await hass.async_add_executor_job(_read_ebird_codes)
 
 
 class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -556,6 +565,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._images.async_init()
 
+        # Preload the bundled eBird-code fallback map off the event loop, so
+        # the synchronous _sp_code_for() lookups during a poll never touch disk.
+        await _async_load_ebird_codes(self.hass)
+
         self._stores_loaded = True
 
     async def _ensure_daily_counts(self, today: date) -> None:
@@ -708,7 +721,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else fall back to the bundled eBird map. The fallback lets species seen
         only via /daily-count (e.g. rare birds the /detections sample misses)
         still get an image. Empty string when truly unknown."""
-        return self._sp_codes.get(species) or _ebird_codes().get(species, "")
+        return self._sp_codes.get(species) or (_EBIRD_CODES or {}).get(species, "")
 
     def _build_yearly_top(self) -> list[dict[str, Any]]:
         """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
