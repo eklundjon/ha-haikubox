@@ -75,6 +75,33 @@ Full card reference, including the ranked list card and `tap_action` configurati
 | Haikubox API endpoints, polling, image CDN, failure modes | [docs/api.md](docs/api.md) |
 | Module map, data flow, persistence, lifecycle, custom-card registration | [docs/architecture.md](docs/architecture.md) |
 
+## Attribution & data licensing
+
+**Haikubox detection data & photos.** This integration surfaces data from the
+Haikubox API — detections, species counts, and the bird photos served from its
+image CDN — which is powered by [BirdNET](https://birdnet.cornell.edu/). Per
+Haikubox, that data is licensed under **Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0)**. If you use
+Haikubox data for research, please cite BirdNET:
+
+> Kahl, S., Wood, C. M., Eibl, M., & Klinck, H. (2021). BirdNET: A deep learning
+> solution for avian diversity monitoring. *Ecological Informatics*, 61, 101236.
+
+**Species-code map.** To resolve a photo for species not yet seen in the live
+detection sample, the integration bundles a derived `common name → species
+code` map from the **eBird/Clements Checklist v2025** (© Cornell Lab of
+Ornithology) — see
+[custom_components/haikubox/data/NOTICE.md](custom_components/haikubox/data/NOTICE.md)
+for the citation and terms.
+
+**Non-commercial.** Both data sources above are **non-commercial**. The
+integration's *code* is MIT-licensed (below), but the bird **data** it relies on
+is not free for commercial use — review the licenses above before any commercial
+deployment.
+
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details. This applies to the
+integration's **code**. The bird data it surfaces (Haikubox / BirdNET, and the
+bundled eBird-derived map) is covered by the separate licenses noted under
+**Attribution & data licensing** above, not by the MIT license.

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -48,6 +51,24 @@ _STORE_VERSION = 1
 # Config entry whose runtime_data is the coordinator (lazily evaluated,
 # so the forward reference to the class below is fine).
 type HaikuboxConfigEntry = ConfigEntry[HaikuboxCoordinator]
+
+
+@lru_cache(maxsize=1)
+def _ebird_codes() -> dict[str, str]:
+    """Bundled common-name → eBird species_code fallback map (lazy-loaded once).
+
+    Haikubox's sp_code is the eBird species code, and the image S3 is keyed by
+    it — but we only *learn* a species' code from the /detections sample, which
+    omits rarely-heard species. This derived map (from the eBird/Clements
+    taxonomy) lets daily-count-only species still resolve an image. See
+    data/ebird_species_codes.json and its NOTICE.
+    """
+    path = Path(__file__).parent / "data" / "ebird_species_codes.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("names", {})
+    except (OSError, ValueError):
+        _LOGGER.warning("Could not load bundled eBird species-code map")
+        return {}
 
 
 class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -663,7 +684,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         denom = max(self._yearly_species_count, 1)
         out: list[dict[str, Any]] = []
         for sp, c in counts7.items():
-            sp_code = self._sp_codes.get(sp, "")
+            sp_code = self._sp_code_for(sp)
             rank = self._yearly_ranks.get(sp, self._yearly_species_count)
             out.append({
                 "species": sp,
@@ -682,12 +703,19 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Dataset builders (store-only, no API calls)
     # ------------------------------------------------------------------
 
+    def _sp_code_for(self, species: str) -> str:
+        """Resolve a species' sp_code: prefer what we learned from /detections,
+        else fall back to the bundled eBird map. The fallback lets species seen
+        only via /daily-count (e.g. rare birds the /detections sample misses)
+        still get an image. Empty string when truly unknown."""
+        return self._sp_codes.get(species) or _ebird_codes().get(species, "")
+
     def _build_yearly_top(self) -> list[dict[str, Any]]:
         """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
         result = []
         for item in self._yearly_items:
             sp = item["species"]
-            sp_code = self._sp_codes.get(sp, "")
+            sp_code = self._sp_code_for(sp)
             result.append({
                 **item,
                 "sp_code": sp_code,
@@ -702,7 +730,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result = []
         for item in daily_count:
             sp = item["species"]
-            sp_code = self._sp_codes.get(sp, "")
+            sp_code = self._sp_code_for(sp)
             result.append({
                 **item,
                 "sp_code": sp_code,
@@ -731,7 +759,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         denom = max(self._yearly_species_count, 1)
         result: list[dict[str, Any]] = []
         for species, first_seen in sorted_items:
-            sp_code = self._sp_codes.get(species, "")
+            sp_code = self._sp_code_for(species)
             rank = self._yearly_ranks.get(species, self._yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
