@@ -12,7 +12,7 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.new_species` | Most recently first-detected species | `detections` (lifetime history — most recent 50 first-seen, ranked by first-seen recency), `lifetime_species_count` |
 | `sensor.daily_count` | Total detections, past 24 h | — (total counter) |
 | `sensor.daily_top_species` | Number of species, past 24 h | `detections` (ranked by 24h count) |
-| `sensor.yearly_top_species` | Number of species this calendar year | `detections` (ranked by yearly count) |
+| `sensor.yearly_top_species` | Number of species in the last 12 months | `detections` (ranked by 12-month count) |
 | `sensor.rarest_species` | Number of species, rolling 7 d | `detections` (ranked by rarity) |
 | `sensor.lifetime_species` | Distinct species ever detected on this box | — (plain count; `MEASUREMENT` state class for long-term statistics) |
 
@@ -43,10 +43,10 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 | `notable_species` | most notable | `notability_score` desc (rarity ↔ recency blend) |
 | `new_species` | most recently first-seen | `first_seen` desc |
 | `daily_top_species` | most detected in last 24 h | 24h `count` desc |
-| `yearly_top_species` | most detected this calendar year | yearly `count` |
+| `yearly_top_species` | most detected in the last 12 months | 12-month `count` |
 | `rarest_species` | rarest in last 7 days | `rarity_score` desc |
 
-Any of these can drive the `haikubox-bird-list-card`. `recent_detections` reads the 1-hour subset; `notable_species` reads the full 24-hour window (so its blend has room for the recency component to matter). Both sets of records come straight from the live `/detections` response and carry full metadata immediately. `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` fills in as its 7-day window accumulates.
+Any of these can drive the `haikubox-bird-list-card`. `recent_detections` reads the 1-hour subset; `notable_species` reads the full 24-hour window (so its blend has room for the recency component to matter). Both sets of records come straight from the live `/detections` response and carry full metadata immediately. `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` is available as soon as the per-day backfill has fetched the last week (typically the first poll).
 
 ### Per-species vs. per-event, live vs. sticky
 
@@ -61,7 +61,7 @@ Most lists are **live** — recomputed every poll from the current detection win
 
 ## Rarity scoring
 
-The `notable_species` and `rarest_species` sensors score each species against your box's own yearly history. A species not present in your box's yearly data scores `1.0` (capped — tied with the rarest known species rather than overshooting it); the most-detected species scores near `0`. So a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
+The `notable_species` and `rarest_species` sensors score each species against your box's own **rolling 12-month** history (a trailing window the integration assembles from per-day `/daily-count` data — it slides continuously rather than resetting on Jan 1). A species not present in that window scores `1.0` (capped — tied with the rarest known species rather than overshooting it); the most-detected species scores near `0`. So a Cooper's Hawk scores as more unusual on a box that rarely records raptors than on one that hears them daily.
 
 ## Notability tuning
 
@@ -89,6 +89,5 @@ The following data is written to `.storage/` and survives HA restarts:
 | `haikubox.<serial>.sp_codes` | Species → species code lookup |
 | `haikubox.<serial>.sci_names` | Species → scientific name lookup |
 | `haikubox.<serial>.last_seen` | Species → most recent detection timestamp |
-| `haikubox.<serial>.yearly` | Yearly species baseline |
-| `haikubox.<serial>.seven_day` | Rolling 7-day detection data |
+| `haikubox.<serial>.daily_counts` | Per-day species counts (full box lifetime). The rarity baseline (trailing 12 months) and the 7-day `rarest_species` window are both aggregated from this; built by backfilling `/daily-count` history. |
 | `haikubox.<serial>.sticky` | Last `last_detection` / `notable_species` records |

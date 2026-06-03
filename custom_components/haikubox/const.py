@@ -17,10 +17,10 @@ DEFAULT_SCAN_INTERVAL = 600  # 10 minutes
 # response with a timestamp filter.
 RECENT_WINDOW_HOURS = 1
 
-# Rolling window for the "daily" sensors. The Haikubox /daily-count
-# endpoint is a server-side calendar day; instead we derive a true
-# trailing 24-hour view from /detections (24 is the endpoint's max).
-# This is also the only window we actually fetch — see RECENT_WINDOW_HOURS.
+# Rolling window for the "daily" sensors. For these we want a true trailing
+# 24-hour view, so we derive it from /detections (24 is the endpoint's max)
+# rather than the server-side calendar-day /daily-count. (/daily-count is used
+# separately, by calendar day, to build the rarity baseline — see below.)
 DAILY_WINDOW_HOURS = 24
 
 # Cap on the per-event `detections` list exposed on the last_detection

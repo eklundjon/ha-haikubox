@@ -88,13 +88,12 @@ Everything interesting happens in [`coordinator.py`](../custom_components/haikub
 ```mermaid
 flowchart TD
     Start([poll fires every 10 min]) --> LoadStores{stores loaded?}
-    LoadStores -- no --> Load[load 7 .storage files<br/>rehydrate stickies + yearly ranks]
-    LoadStores -- yes --> YearlyCheck
-    Load --> YearlyCheck{yearly fetched<br/>today?}
+    LoadStores -- no --> Load[load 6 .storage files<br/>rehydrate stickies;<br/>rebuild baseline]
+    LoadStores -- yes --> EnsureDaily
+    Load --> EnsureDaily
 
-    YearlyCheck -- no --> FetchYearly[GET /yearly-count<br/>build rank lookup]
-    YearlyCheck -- yes --> FetchDetections
-    FetchYearly --> FetchDetections
+    EnsureDaily[_ensure_daily_counts<br/>new completed day + backfill chunk<br/>via /daily-count?date] --> Rebuild[_rebuild_baseline<br/>aggregate trailing 365d<br/>→ rank lookup]
+    Rebuild --> FetchDetections
 
     FetchDetections[GET /detections?hours=24] --> FilterRecent[_filter_by_dt<br/>raw items where<br/>dt &gt; now - 1h]
     FilterRecent --> NormaliseRecent[_normalise_detections<br/>on recent subset<br/>+ _apply_rarity_scores]
@@ -108,8 +107,8 @@ flowchart TD
     SeedSeen -- existing --> NewSpecies
     SeedFrom24h --> NewSpecies
 
-    NewSpecies[track new species<br/>vs _seen_species<br/>from recent window] --> SevenDay[update 7-day store<br/>from daily_count]
-    SevenDay --> Sticky[update sticky last_detected<br/>+ last_notable from recent]
+    NewSpecies[track new species<br/>vs _seen_species<br/>from recent window] --> Rarest[_build_rarest<br/>last 7d of daily_counts + today<br/>scored by baseline]
+    Rarest --> Sticky[update sticky last_detected<br/>+ last_notable from recent]
 
     Sticky --> StickyBoot{stickies<br/>still None?}
     StickyBoot -- fresh install --> SeedSticky[seed stickies<br/>from daily_count]
@@ -125,9 +124,9 @@ flowchart TD
 
 The flow is **strictly sequential** — each `await` waits for the previous one. There's no `asyncio.gather` and no background tasks. This keeps the data dependencies explicit:
 
-- Yearly ranks must exist before rarity scoring.
+- The rarity baseline (the trailing-window aggregate from `daily_counts`) must be rebuilt before rarity scoring.
 - `daily_count` (the 24-hour normalisation) has to land before the `_seen_species` bootstrap — that bootstrap fires *before* the recent-window new-species loop so a fresh install seeds from the full 24-hour window, not just the 1-hour subset (see issue #14).
-- The 7-day store reads `daily_count` rather than the recent subset, so species heard 1–24h ago still refresh today's bucket (see issue #15).
+- `rarest_species` reads the last 7 days of `daily_counts` plus today's 24h list, so species heard 1–24h ago still count toward today (see issue #15).
 - Sticky updates run after the recent-window processing has populated `_last_detected`, so the fresh-install bootstrap can correctly distinguish "we already have a value" from "we need to seed one."
 - Notability is the last scoring pass: it reads the user-tuned `notable_rarity_weight` from `entry.options` and stamps a blended `notability_score` on every `daily_count` record before the output dict is built.
 
@@ -153,7 +152,7 @@ The coordinator holds three categories of state:
 
 ### 1. Volatile in-memory (rebuilt every poll)
 
-Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `daily_count` (24h list, ranked by count), `notable` (24h list, ranked by `notability_score`), `seven_day_rare` (7d store output), `recent_events` (per-event log → `last_detection.detections`). Plus the lifetime-history list returned by `_build_new_species_history()` (→ `new_species.detections`), built from the durable `_seen_species` log so it's effectively sticky from poll to poll.
+Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `daily_count` (24h list, ranked by count), `notable` (24h list, ranked by `notability_score`), `seven_day_rare` (`_build_rarest` output — last 7 days of `daily_counts`), `recent_events` (per-event log → `last_detection.detections`). Plus the lifetime-history list returned by `_build_new_species_history()` (→ `new_species.detections`), built from the durable `_seen_species` log so it's effectively sticky from poll to poll.
 
 ### 2. Sticky in-memory (persisted to `.storage/`)
 
@@ -163,8 +162,7 @@ Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `da
 | `_sp_codes: dict[str, str]` | `haikubox.<serial>.sp_codes` | `_load_stores` |
 | `_sci_names: dict[str, str]` | `haikubox.<serial>.sci_names` | `_load_stores` |
 | `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_load_stores` |
-| `_yearly_items` + `_yearly_ranks` + `_yearly_species_count` | `haikubox.<serial>.yearly` | `_load_stores` (ranks rebuilt from list) |
-| `_seven_day_data: dict[str, list]` | `haikubox.<serial>.seven_day` | `_load_stores` |
+| `_daily_counts: dict[str, dict[str, int]]` (full lifetime) — the derived `_yearly_ranks` / `_yearly_species_count` / `_yearly_items` are rebuilt from its trailing window | `haikubox.<serial>.daily_counts` | `_load_stores` (baseline rebuilt at load) |
 | `_last_detected`, `_last_notable` | `haikubox.<serial>.sticky` | `_load_stores` |
 
 Each store is written **only when its data changes**, gated by a dirty flag. The sticky store, for example, only writes when the species shown by `last_detection` or `notable_species` actually changes — not on every poll.
@@ -298,7 +296,7 @@ URL — see [docs/automations.md](automations.md).
 - **`_unrecorded_attributes = {"detections"}`** on every sensor. The `detections` lists can run to 50+ records with images and metadata; persisting them on every state change would bloat the recorder DB and trip HA's state-attribute size warnings. The lists stay on the live state object for cards to read.
 - **Idempotent migration on every setup.** The shim doesn't track "has migration run" — it just checks the registry. Cheap, no version flag to maintain, no chance of getting out of sync.
 - **24-hour bootstrap for sticky sensors.** A fresh install during a quiet hour would otherwise show `last_detection`/`notable_species`/`new_species` as `unknown` indefinitely. The bootstrap seeds them from the 24-hour window we already fetch every poll. The same window also seeds `_seen_species` (lifetime first-seen log) so `new_detections` populates on poll 1 — see [docs/sensors.md](sensors.md) for the user-visible effect.
-- **UTC day boundaries.** The coordinator's "today" is `datetime.now(timezone.utc).date()` — used to key the 7-day store and to gate the once-per-day yearly refresh. This aligns with the API's UTC `dt` timestamps so the 7-day bucket the data lands in matches the dates inside it, and it makes the day boundary deterministic across hosts regardless of their local timezone.
+- **UTC day boundaries.** The coordinator's "today" is `datetime.now(timezone.utc).date()` — used to bound the trailing rarity window, the 7-day `rarest_species` window, and which `/daily-count` dates to fetch. This aligns with the API's UTC `dt` timestamps and makes the day boundary deterministic across hosts regardless of their local timezone.
 - **Sticky lifetime lists where the data supports them.** `last_detection.detections` is the most-recent 50 individual events from the 24-hour window (per-event, not per-species); `new_species.detections` is the 50 most-recently-first-seen species, derived from `_seen_species` and therefore sticky across polls and restarts. This gives the bird-card a populated `detections[0]` on every sticky sensor as long as the box has any history — the card never falls back to "no data" except in genuine 24h+ silence (a hardware signal).
 - **Notability is user-tunable.** `notable_species` ranks by a `notability_score = w · rarity_score + (1 − w) · recency_score` blend. The weight `w` is exposed as a 0–100 % slider in the integration's options flow (Devices & Services → Haikubox → Configure). An `entry.add_update_listener` triggers `coordinator.async_request_refresh()` on slider change so the ranking updates within seconds, not at the next 10-min poll.
 - **Cards read state, not the coordinator.** That makes them dashboard-portable: a user can copy the card YAML between HA instances and it just works as long as the sensors are present.
