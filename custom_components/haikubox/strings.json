@@ -86,6 +86,9 @@
       },
       "species_diversity": {
         "name": "Species diversity (today)"
+      },
+      "activity_level": {
+        "name": "Activity vs. typical"
       }
     },
     "binary_sensor": {

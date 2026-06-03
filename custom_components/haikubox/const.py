@@ -63,6 +63,11 @@ TRIGGER_TYPES = (TRIGGER_NEW_SPECIES, TRIGGER_UNUSUAL_VISITOR)
 # keeps full box-lifetime daily counts (a reusable dataset — trends, phenology,
 # true first-seen); rarity sums only the trailing RARITY_WINDOW_DAYS.
 RARITY_WINDOW_DAYS = 365
+# "Typical" daily activity for the activity-vs-typical sensor: mean detection
+# total over the trailing this-many *completed* days (zero/offline days
+# excluded, so it reflects a typical active day, not one dragged down by an
+# outage). The sensor compares the most recent completed day against this.
+ACTIVITY_BASELINE_DAYS = 30
 # Throttle the one-time historical backfill so a fresh install doesn't hammer
 # the API. Two-tier (days fetched per poll, walking backward): fetch the
 # rarity-relevant trailing year quickly, then ease off for the deep-history

@@ -35,6 +35,7 @@ async def async_setup_entry(
             HaikuboxLifetimeSpeciesSensor(coordinator, serial),
             HaikuboxDetectionsTodaySensor(coordinator, serial),
             HaikuboxSpeciesDiversitySensor(coordinator, serial),
+            HaikuboxActivitySensor(coordinator, serial),
         ]
     )
 
@@ -390,3 +391,38 @@ class HaikuboxSpeciesDiversitySensor(_HaikuboxSensor):
         else:
             evenness = 1.0 if richness == 1 else 0.0
         return {"richness": richness, "evenness": evenness}
+
+
+class HaikuboxActivitySensor(_HaikuboxSensor):
+    """Most recent full day's detection volume relative to a typical day.
+
+    Ratio of the latest *completed* day's total to the mean total over the last
+    30 active days (both true /daily-count figures): 1.0 ≈ a normal day, 2.0 ≈
+    twice as busy, 0.5 ≈ half. A completed-day comparison (not today's partial),
+    so it's stable rather than ramping through the day. `unknown` until there's
+    a baseline. Exposes the day, its total, and the typical figure.
+    """
+
+    _attr_translation_key = "activity_level"
+    _attr_icon = "mdi:speedometer"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_activity_level"
+
+    @property
+    def native_value(self) -> float | None:
+        typical = self.coordinator.data.get("typical_daily_count")
+        latest = self.coordinator.data.get("latest_day_total")
+        if not typical or latest is None:
+            return None
+        return round(latest / typical, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "as_of_date": self.coordinator.data.get("latest_day_date"),
+            "day_total": self.coordinator.data.get("latest_day_total"),
+            "typical_daily_count": self.coordinator.data.get("typical_daily_count"),
+        }

@@ -17,6 +17,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    ACTIVITY_BASELINE_DAYS,
     API_BASE,
     BACKFILL_REQUEST_DELAY,
     BACKFILL_STOP_AFTER_404,
@@ -413,6 +414,24 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             today_species = {}
         today_total = sum(today_species.values())
 
+        # Activity-vs-typical: compare the most recent *completed* day to the
+        # mean of completed days over the trailing ACTIVITY_BASELINE_DAYS
+        # (excluding zero/offline days). Completed days only (not today's
+        # partial), so the ratio is a stable full-day-vs-full-day comparison.
+        today_str = today.isoformat()
+        baseline_cutoff = (today - timedelta(days=ACTIVITY_BASELINE_DAYS)).isoformat()
+        completed = {
+            d: sum(c.values()) for d, c in self._daily_counts.items() if d < today_str
+        }
+        window_totals = [
+            t for d, t in completed.items() if d >= baseline_cutoff and t > 0
+        ]
+        typical_daily = (
+            round(sum(window_totals) / len(window_totals), 1) if window_totals else None
+        )
+        latest_day = max(completed) if completed else None
+        latest_day_total = completed[latest_day] if latest_day else None
+
         return {
             # key == sensor id; the public list attribute is always
             # `detections`. Singular keys are sticky single records;
@@ -439,6 +458,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "rarest_species": _ranked(seven_day_rare),       # by rarity
             "today_total": today_total,                       # true daily total (/daily-count)
             "today_species": today_species,                   # true per-species map (diversity)
+            "typical_daily_count": typical_daily,             # mean active completed-day total
+            "latest_day_total": latest_day_total,             # most recent completed day's total
+            "latest_day_date": latest_day,                    # its date (ISO)
         }
 
     # ------------------------------------------------------------------
