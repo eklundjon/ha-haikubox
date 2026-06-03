@@ -30,3 +30,11 @@ Per the eBird/Clements terms of use:
 
 To refresh: download the current eBird Taxonomy CSV from the link above and
 regenerate the `common name → SPECIES_CODE` map for `CATEGORY == "species"`.
+
+---
+
+This file covers only the bundled eBird-derived map. The **Haikubox API data**
+the integration surfaces at runtime (detections, counts, photos) is separately
+licensed by Haikubox under **CC BY-NC-SA 4.0** and asks that research use cite
+BirdNET (Kahl et al. 2021) — see the **Attribution & data licensing** section
+of the project README.
