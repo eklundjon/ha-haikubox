@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -32,6 +34,7 @@ async def async_setup_entry(
             HaikuboxRarestSpeciesSensor(coordinator, serial),
             HaikuboxLifetimeSpeciesSensor(coordinator, serial),
             HaikuboxDetectionsTodaySensor(coordinator, serial),
+            HaikuboxSpeciesDiversitySensor(coordinator, serial),
         ]
     )
 
@@ -343,3 +346,47 @@ class HaikuboxDetectionsTodaySensor(_HaikuboxSensor):
     @property
     def native_value(self) -> int:
         return self.coordinator.data.get("today_total", 0)
+
+
+class HaikuboxSpeciesDiversitySensor(_HaikuboxSensor):
+    """Shannon diversity index (H′) over today's detections.
+
+    H′ = −Σ pᵢ·ln(pᵢ), where pᵢ is each species' share of today's TRUE
+    per-species counts (from /daily-count — the ≤5/species /detections sample
+    would flatten the distribution and make this meaningless). One number for
+    how varied activity is, not just how much: ~0 when one species dominates,
+    higher with more species detected evenly. Exposes species richness and
+    Pielou evenness (H′/ln S, 0–1) as attributes.
+    """
+
+    _attr_translation_key = "species_diversity"
+    _attr_icon = "mdi:sprout"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_species_diversity"
+
+    def _shannon(self) -> tuple[float, int]:
+        counts = [
+            c for c in self.coordinator.data.get("today_species", {}).values() if c > 0
+        ]
+        total = sum(counts)
+        if total <= 0:
+            return 0.0, 0
+        h = -sum((c / total) * math.log(c / total) for c in counts)
+        return (h if h > 0 else 0.0), len(counts)  # normalise -0.0 → 0.0
+
+    @property
+    def native_value(self) -> float:
+        h, _ = self._shannon()
+        return round(h, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        h, richness = self._shannon()
+        if richness > 1:
+            evenness = round(h / math.log(richness), 2)
+        else:
+            evenness = 1.0 if richness == 1 else 0.0
+        return {"richness": richness, "evenness": evenness}

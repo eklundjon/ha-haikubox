@@ -83,6 +83,9 @@
       },
       "detections_today": {
         "name": "Detections today"
+      },
+      "species_diversity": {
+        "name": "Species diversity (today)"
       }
     },
     "binary_sensor": {
