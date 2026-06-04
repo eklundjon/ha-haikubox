@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ACTIVITY_BASELINE_DAYS,
@@ -97,6 +98,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.serial = serial = entry.data[CONF_SERIAL]
         self.device_name = entry.data.get(CONF_DEVICE_NAME, "Haikubox")
         self._session = async_get_clientsession(hass)
+        # The box's own timezone (from the box-info endpoint), resolved lazily
+        # on the first poll and cached. /daily-count is keyed to the box's local
+        # calendar day, so day-boundary math must use the box's tz — the box may
+        # sit in a different timezone than the Home Assistant host.
+        self._box_tz: tzinfo | None = None
 
         # Yearly counts — refreshed once per calendar day
         self._yearly_ranks: dict[str, int] = {}   # species → rank (1 = most common)
@@ -147,11 +153,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._stores_loaded:
             await self._load_stores()
 
-        # UTC-anchored so that day-boundary semantics (7-day store keys,
-        # once-per-day yearly refresh) align with the API's UTC dt stamps
-        # and behave the same on every host regardless of local timezone
-        # (issue #16).
-        today = datetime.now(timezone.utc).date()
+        # Anchor "today" to the box's OWN timezone, NOT UTC. The /daily-count
+        # endpoint is keyed to the box's local calendar day, and the per-day
+        # store, 7-day window, and once-per-day refresh should all turn over on
+        # that same local midnight. A UTC "today" runs ahead of the box's day
+        # every evening west of UTC, so the today /daily-count request asked for
+        # a not-yet-existent date (HTTP 400) and zeroed "Detections today" until
+        # UTC midnight. The box's tz comes from the API (it may differ from the
+        # HA host's); until it resolves, dt_util.now() falls back to HA's tz.
+        # (Supersedes the earlier UTC anchoring from issue #16.)
+        today = dt_util.now(await self._async_box_tz()).date()
 
         # Keep the per-day counts store fresh (fetch newly-completed days +
         # a throttled chunk of historical backfill), then rebuild the rarity
@@ -909,6 +920,28 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
+
+    async def _async_box_tz(self) -> tzinfo | None:
+        """The box's own timezone, from the box-info endpoint (cached).
+
+        Resolved once and reused. Returns ``None`` until the lookup succeeds, in
+        which case callers fall back to Home Assistant's configured tz via
+        ``dt_util.now(None)``. Day-boundary math needs the *box's* local day
+        because /daily-count is keyed to it, and the box can live in a different
+        timezone than the HA host.
+        """
+        if self._box_tz is not None:
+            return self._box_tz
+        try:
+            async with self._session.get(f"{API_BASE}/haikubox/{self.serial}") as resp:
+                resp.raise_for_status()
+                info = await resp.json()
+            name = (info or {}).get("tz")
+            if name:
+                self._box_tz = await dt_util.async_get_time_zone(name)
+        except (aiohttp.ClientError, ValueError) as err:
+            _LOGGER.debug("Could not resolve box timezone (falling back to HA tz): %s", err)
+        return self._box_tz
 
     async def _fetch_detections(self, hours: int) -> Any:
         url = f"{API_BASE}/haikubox/{self.serial}/detections"
