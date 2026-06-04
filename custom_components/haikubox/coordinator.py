@@ -104,10 +104,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # sit in a different timezone than the Home Assistant host.
         self._box_tz: tzinfo | None = None
 
-        # Yearly counts — refreshed once per calendar day
-        self._yearly_ranks: dict[str, int] = {}   # species → rank (1 = most common)
-        self._yearly_species_count: int = 0
-        self._yearly_fetched_date: date | None = None
+        # Rarity baseline — a trailing RARITY_WINDOW_DAYS aggregate over the
+        # per-day counts, rebuilt every poll (cheap). The `yearly_*` data keys /
+        # `yearly_rank` record field that this feeds keep their names for
+        # backward compatibility (entity ids, event payload, cards, docs).
+        self._baseline_ranks: dict[str, int] = {}   # species → rank (1 = most common)
+        self._baseline_species_count: int = 0
+        # Whether the first-seen log has been reconciled against _daily_counts
+        # at least once this session (the reconciliation otherwise runs only
+        # when the per-day history changes).
+        self._reconciled_once: bool = False
 
         # Sticky records — set on first detection, never cleared; persisted
         # so last_detection / notable_species survive an HA restart instead
@@ -128,7 +134,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sp_codes: dict[str, str] = {}              # species → sp_code
         self._sci_names: dict[str, str] = {}             # species → scientific_name
         self._last_seen: dict[str, str] = {}             # species → last_seen ISO
-        self._yearly_items: list[dict[str, Any]] = []    # trailing-window baseline [{species, count, rank}]
+        self._baseline_items: list[dict[str, Any]] = []    # trailing-window baseline [{species, count, rank}]
         self._daily_counts: dict[str, dict[str, int]] = {}  # date_str → {species: count}, full lifetime
         self._backfill_complete: bool = False            # reached the pre-install 404 floor
         self._backfill_cursor: str | None = None         # oldest date the deep backfill has probed
@@ -168,8 +174,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # a throttled chunk of historical backfill), then rebuild the rarity
         # baseline by aggregating the trailing RARITY_WINDOW_DAYS. This slides
         # continuously, so it never resets on Jan 1 the way /yearly-count did.
+        daily_changed = False
         try:
-            await self._ensure_daily_counts(today)
+            daily_changed = await self._ensure_daily_counts(today)
         except aiohttp.ClientError as err:
             _LOGGER.warning("Could not fetch daily counts: %s", err)
         self._rebuild_baseline(today)
@@ -180,7 +187,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # fresh install whose first /daily-count fetch failed reaches here; any
         # prior success rehydrates _daily_counts from .storage at load time, and
         # HA retries the first refresh automatically, so this self-heals.
-        if not self._yearly_ranks:
+        if not self._baseline_ranks:
             raise UpdateFailed(
                 "Rarity baseline not yet available — /daily-count backfill has "
                 "no data yet and there is no cached history"
@@ -199,7 +206,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
 
         detections = _normalise_detections(recent_raw)
-        _apply_rarity_scores(detections, self._yearly_ranks, self._yearly_species_count)
+        _apply_rarity_scores(detections, self._baseline_ranks, self._baseline_species_count)
 
         # "Daily" sensors use a true trailing 24-hour window derived from
         # /detections (not the server-side calendar-day /daily-count),
@@ -213,7 +220,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda x: x.get("count", 0),
             reverse=True,
         )
-        _apply_rarity_scores(daily_count, self._yearly_ranks, self._yearly_species_count)
+        _apply_rarity_scores(daily_count, self._baseline_ranks, self._baseline_species_count)
 
         # Cache images and rewrite image_url to local path
         for d in detections:
@@ -246,20 +253,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         seen_dirty = False
 
-        # Reconcile the lifetime first-seen log with the TRUE per-day history.
-        # On its own _seen_species only records when the *integration* first
-        # observed a species, so a recent (re)install makes everything look new
-        # (e.g. new-in-30-days == lifetime). daily_counts holds the box's real
-        # backfilled history, so a species' first_seen should be the earliest
-        # day it actually appears there. Walking oldest-first, set or lower each
-        # species' first_seen accordingly. This also stops the live new_species
-        # event from firing for species already present in that history.
-        for _day in sorted(self._daily_counts):
-            for _sp in self._daily_counts[_day]:
-                _prev = self._seen_species.get(_sp)
-                if _prev is None or _day < _prev[:10]:
-                    self._seen_species[_sp] = _day
-                    seen_dirty = True
+        # Reconcile the lifetime first-seen log against the per-day history —
+        # only when that history actually changed this poll (new/backfilled
+        # days), or once per session as a safety net. Walking all of
+        # _daily_counts every poll is wasted work once the store is stable.
+        if daily_changed or not self._reconciled_once:
+            if self._reconcile_first_seen():
+                seen_dirty = True
+            self._reconciled_once = True
 
         # Fresh-install bootstrap for _seen_species. Must run BEFORE the
         # recent-window loop below; otherwise that loop would seed
@@ -420,8 +421,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # recent events here, capped to bound attribute size.
         recent_events = _build_recent_events(
             daily_raw,
-            self._yearly_ranks,
-            self._yearly_species_count,
+            self._baseline_ranks,
+            self._baseline_species_count,
             self._images.url_for,
             LAST_DETECTION_EVENT_LIMIT,
         )
@@ -442,37 +443,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             today_species = {}
         today_total = sum(today_species.values())
 
-        # Activity-vs-typical: compare the most recent *completed* day to the
-        # mean of completed days over the trailing ACTIVITY_BASELINE_DAYS
-        # (excluding zero/offline days). Completed days only (not today's
-        # partial), so the ratio is a stable full-day-vs-full-day comparison.
-        today_str = today.isoformat()
-        baseline_cutoff = (today - timedelta(days=ACTIVITY_BASELINE_DAYS)).isoformat()
-        completed = {
-            d: sum(c.values()) for d, c in self._daily_counts.items() if d < today_str
-        }
-        window_totals = [
-            t for d, t in completed.items() if d >= baseline_cutoff and t > 0
-        ]
-        typical_daily = (
-            round(sum(window_totals) / len(window_totals), 1) if window_totals else None
-        )
-        latest_day = max(completed) if completed else None
-        latest_day_total = completed[latest_day] if latest_day else None
-
-        # New-species momentum: how many species were first heard in the last
-        # NEW_SPECIES_WINDOW_DAYS, and days since the most recent lifetime
-        # first. first_seen values are ISO strings (date or datetime); compare
-        # on the YYYY-MM-DD prefix (lexicographic == chronological for ISO).
-        new_cutoff = (today - timedelta(days=NEW_SPECIES_WINDOW_DAYS)).isoformat()
-        first_seen_dates = [fs[:10] for fs in self._seen_species.values() if fs]
-        new_species_window = sum(1 for fs in first_seen_dates if fs >= new_cutoff)
-        days_since_new: int | None = None
-        if first_seen_dates:
-            try:
-                days_since_new = (today - date.fromisoformat(max(first_seen_dates))).days
-            except ValueError:
-                days_since_new = None
+        # Activity-vs-typical and new-species-momentum figures (store-only).
+        metrics = self._compute_window_metrics(today)
+        typical_daily = metrics["typical_daily"]
+        latest_day_total = metrics["latest_day_total"]
+        latest_day = metrics["latest_day_date"]
+        new_species_window = metrics["new_species_window"]
+        days_since_new = metrics["days_since_new"]
 
         return {
             # key == sensor id; the public list attribute is always
@@ -485,11 +462,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_detection": self._last_detected,           # sticky
             "recent_events": _ranked(recent_events),         # per-event by dt desc
             "notable_detection": self._last_notable,         # sticky
-            # Capped (≤5/species) trailing-24h list from /detections. No longer
-            # the daily_count *sensor's* value (that's today_total now) — kept
-            # for the extended-silence emptiness check and rarest's "seen today"
+            # Capped (≤5/species) trailing-24h list from /detections. NOT the
+            # daily_count *sensor's* value (that's today_total) — hence the
+            # distinct key, to avoid conflating the two. Kept for the
+            # extended-silence emptiness check and rarest's "seen today"
             # membership, both of which only need presence, not true counts.
-            "daily_count": daily_count,
+            "detections_24h": daily_count,
             "daily_top_species": _ranked(self._build_today_top(today_species)),  # true counts, today
             "notable_detections": _ranked(notable),          # by rarity
             # Sticky lifetime-history list (N most recently first-seen
@@ -500,7 +478,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "new_detections": _ranked(self._build_new_species_history()),
             "new_detection": self._build_last_new_species(), # sticky
             "lifetime_species_count": len(self._seen_species),
-            "yearly_top_species": self._build_yearly_top(),  # by yearly count (own rank)
+            "yearly_top_species": self._build_baseline_top(),  # by trailing-window count (own rank)
             "rarest_species": _ranked(seven_day_rare),       # by rarity
             "today_total": today_total,                       # true daily total (/daily-count)
             "today_species": today_species,                   # true per-species map (diversity)
@@ -641,8 +619,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Rebuild the rarity baseline from the persisted daily counts so
         # rarity is available immediately on restart, before the first poll's
-        # daily-count fetch. No-op-safe when the store is empty.
-        self._rebuild_baseline(datetime.now(timezone.utc).date())
+        # daily-count fetch. No-op-safe when the store is empty. Anchor to the
+        # box's tz (resolved + cached here so the first poll reuses it — no
+        # extra request); the window is 365 days, so the boundary day is moot.
+        self._rebuild_baseline(dt_util.now(await self._async_box_tz()).date())
 
         # One-time cleanup of the legacy stores that earlier versions wrote.
         # The trailing-window baseline supersedes both, so they're orphaned;
@@ -661,8 +641,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._stores_loaded = True
 
-    async def _ensure_daily_counts(self, today: date) -> None:
+    async def _ensure_daily_counts(self, today: date) -> bool:
         """Keep _daily_counts current and gap-free, then extend history.
+
+        Returns whether `_daily_counts` changed this poll (so callers can skip
+        work — e.g. the first-seen reconciliation — when nothing new arrived).
 
         Two phases per poll share one throttled budget:
 
@@ -750,6 +733,28 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "misses": self._backfill_misses,
                     }
                 )
+        return changed
+
+    def _reconcile_first_seen(self) -> bool:
+        """Reconcile the lifetime first-seen log against the TRUE per-day history.
+
+        On its own `_seen_species` only records when the *integration* first
+        observed a species, so a recent (re)install makes everything look new
+        (e.g. new-in-30-days == lifetime). `_daily_counts` holds the box's real
+        backfilled history, so a species' first_seen should be the earliest day
+        it actually appears there. Walking oldest-first, set or lower each
+        species' first_seen accordingly. Also stops the live new_species event
+        from firing for species already present in that history. Returns whether
+        anything changed (so the caller can persist `_seen_species`).
+        """
+        changed = False
+        for day in sorted(self._daily_counts):
+            for sp in self._daily_counts[day]:
+                prev = self._seen_species.get(sp)
+                if prev is None or day < prev[:10]:
+                    self._seen_species[sp] = day
+                    changed = True
+        return changed
 
     def _rebuild_baseline(self, today: date) -> None:
         """Aggregate the trailing RARITY_WINDOW_DAYS of daily counts into the
@@ -761,10 +766,51 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if date_str >= cutoff:  # ISO dates compare lexicographically
                 for sp, c in counts.items():
                     totals[sp] = totals.get(sp, 0) + int(c)
-        self._yearly_ranks, self._yearly_species_count, self._yearly_items = (
+        self._baseline_ranks, self._baseline_species_count, self._baseline_items = (
             _ranks_from_counts(totals)
         )
-        self._yearly_fetched_date = today
+
+    def _compute_window_metrics(self, today: date) -> dict[str, Any]:
+        """Activity-vs-typical and new-species-momentum figures, derived purely
+        from the stored per-day counts and the first-seen log (no API calls).
+
+        Activity compares the most recent *completed* day (not today's partial)
+        to the mean of completed days over the trailing ACTIVITY_BASELINE_DAYS,
+        excluding zero/offline days — a stable full-day-vs-full-day ratio.
+        Momentum counts species first heard in the last NEW_SPECIES_WINDOW_DAYS
+        and the gap since the most recent lifetime-first. first_seen values are
+        ISO strings (date or datetime); compared on the YYYY-MM-DD prefix
+        (lexicographic == chronological for ISO).
+        """
+        today_str = today.isoformat()
+        baseline_cutoff = (today - timedelta(days=ACTIVITY_BASELINE_DAYS)).isoformat()
+        completed = {
+            d: sum(c.values()) for d, c in self._daily_counts.items() if d < today_str
+        }
+        window_totals = [t for d, t in completed.items() if d >= baseline_cutoff and t > 0]
+        typical_daily = (
+            round(sum(window_totals) / len(window_totals), 1) if window_totals else None
+        )
+        latest_day = max(completed) if completed else None
+        latest_day_total = completed[latest_day] if latest_day else None
+
+        new_cutoff = (today - timedelta(days=NEW_SPECIES_WINDOW_DAYS)).isoformat()
+        first_seen_dates = [fs[:10] for fs in self._seen_species.values() if fs]
+        new_species_window = sum(1 for fs in first_seen_dates if fs >= new_cutoff)
+        days_since_new: int | None = None
+        if first_seen_dates:
+            try:
+                days_since_new = (today - date.fromisoformat(max(first_seen_dates))).days
+            except ValueError:
+                days_since_new = None
+
+        return {
+            "typical_daily": typical_daily,
+            "latest_day_total": latest_day_total,
+            "latest_day_date": latest_day,
+            "new_species_window": new_species_window,
+            "days_since_new": days_since_new,
+        }
 
     def _build_rarest(
         self, daily_count: list[dict[str, Any]], today: date
@@ -784,11 +830,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if sp:
                 counts7[sp] = counts7.get(sp, 0) + int(d.get("count", 0))
 
-        denom = max(self._yearly_species_count, 1)
+        denom = max(self._baseline_species_count, 1)
         out: list[dict[str, Any]] = []
         for sp, c in counts7.items():
             sp_code = self._sp_code_for(sp)
-            rank = self._yearly_ranks.get(sp, self._yearly_species_count)
+            rank = self._baseline_ranks.get(sp, self._baseline_species_count)
             out.append({
                 "species": sp,
                 "scientific_name": self._sci_name_for(sp),
@@ -819,10 +865,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         species still show a scientific name). Empty string when unknown."""
         return self._sci_names.get(species) or (_EBIRD_SPECIES or {}).get(species, {}).get("sci", "")
 
-    def _build_yearly_top(self) -> list[dict[str, Any]]:
-        """Yearly species list enriched with sp_code, scientific_name, last_seen, and image."""
+    def _build_baseline_top(self) -> list[dict[str, Any]]:
+        """Trailing-window baseline species list enriched with sp_code,
+        scientific_name, last_seen, and image. (Surfaced as the
+        `yearly_top_species` sensor — the name kept for compatibility.)"""
         result = []
-        for item in self._yearly_items:
+        for item in self._baseline_items:
             sp = item["species"]
             sp_code = self._sp_code_for(sp)
             result.append({
@@ -844,11 +892,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         was meaningless ties at 5 (issue #44). This uses the true calendar-day
         counts instead.
         """
-        denom = max(self._yearly_species_count, 1)
+        denom = max(self._baseline_species_count, 1)
         result: list[dict[str, Any]] = []
         for sp, count in today_species.items():
             sp_code = self._sp_code_for(sp)
-            rank = self._yearly_ranks.get(sp, self._yearly_species_count)
+            rank = self._baseline_ranks.get(sp, self._baseline_species_count)
             result.append({
                 "species": sp,
                 "scientific_name": self._sci_name_for(sp),
@@ -878,11 +926,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             key=lambda kv: kv[1] or "",
             reverse=True,
         )[:NEW_SPECIES_HISTORY_LIMIT]
-        denom = max(self._yearly_species_count, 1)
+        denom = max(self._baseline_species_count, 1)
         result: list[dict[str, Any]] = []
         for species, first_seen in sorted_items:
             sp_code = self._sp_code_for(species)
-            rank = self._yearly_ranks.get(species, self._yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
+            rank = self._baseline_ranks.get(species, self._baseline_species_count)  # cap at 1.0; see _apply_rarity_scores
             result.append({
                 "species": species,
                 "scientific_name": self._sci_name_for(species),
@@ -906,12 +954,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
 
     @property
-    def yearly_fetched_date(self) -> date | None:
-        return self._yearly_fetched_date
+    def baseline_species_count(self) -> int:
+        return self._baseline_species_count
 
     @property
-    def yearly_species_count(self) -> int:
-        return self._yearly_species_count
+    def box_timezone(self) -> tzinfo | None:
+        """The box's resolved timezone, or None until the first poll resolves
+        it (callers fall back to HA's tz via dt_util)."""
+        return self._box_tz
 
     @property
     def lifetime_species_count(self) -> int:
@@ -1173,20 +1223,24 @@ def _ranks_from_counts(
 
 def _apply_rarity_scores(
     detections: list[dict[str, Any]],
-    yearly_ranks: dict[str, int],
-    yearly_species_count: int,
+    baseline_ranks: dict[str, int],
+    baseline_species_count: int,
 ) -> None:
     """Mutate detection records in-place to add rarity_score and yearly_rank.
 
-    Species absent from the yearly count fall back to rank=yearly_species_count,
+    Species absent from the baseline fall back to rank=baseline_species_count,
     capping rarity_score at 1.0 — tied with the actually-rarest known
     species rather than overshooting it (issue #17). Without the cap,
     unknown species would always rank above ranked-rarest, which is a
     data-availability artifact rather than a genuine rarity signal.
+
+    The record field is `yearly_rank` (not `baseline_rank`): the name predates
+    the trailing-window baseline and is kept for backward compatibility — it's
+    in the event payload, the card record contract, and the docs.
     """
-    denom = max(yearly_species_count, 1)
+    denom = max(baseline_species_count, 1)
     for d in detections:
-        rank = yearly_ranks.get(d["species"], yearly_species_count)
+        rank = baseline_ranks.get(d["species"], baseline_species_count)
         d["yearly_rank"] = rank
         d["rarity_score"] = round(rank / denom, 4)
 
@@ -1242,8 +1296,8 @@ def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _build_recent_events(
     raw: Any,
-    yearly_ranks: dict[str, int],
-    yearly_species_count: int,
+    baseline_ranks: dict[str, int],
+    baseline_species_count: int,
     image_url_for,
     limit: int,
 ) -> list[dict[str, Any]]:
@@ -1265,7 +1319,7 @@ def _build_recent_events(
     if not isinstance(items, list):
         return []
 
-    denom = max(yearly_species_count, 1)
+    denom = max(baseline_species_count, 1)
     events: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -1277,7 +1331,7 @@ def _build_recent_events(
         if not isinstance(dt_str, str) or not dt_str:
             continue
         species = item.get("cn", "Unknown")
-        rank = yearly_ranks.get(species, yearly_species_count)  # cap at 1.0; see _apply_rarity_scores
+        rank = baseline_ranks.get(species, baseline_species_count)  # cap at 1.0; see _apply_rarity_scores
         # Use `last_seen` for the timestamp field (rather than `dt`) so this
         # list honours the cross-sensor record-shape contract — every other
         # `detections` list exposes `last_seen`, and the bird-list card reads

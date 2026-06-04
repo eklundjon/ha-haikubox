@@ -10,8 +10,8 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.last_detection` | Most recently heard species | `detections` (one per event — most recent 50 in 24 h, ranked by recency) |
 | `sensor.notable_species` | Most "notable" species in the trailing 24 h | `detections` (ranked by notability — tunable blend of rarity and recency); `rarity_score`, `yearly_rank` |
 | `sensor.new_species` | Most recently first-detected species | `detections` (lifetime history — most recent 50 first-seen, ranked by first-seen recency), `lifetime_species_count` |
-| `sensor.daily_count` | Total detections, past 24 h | — (total counter) |
-| `sensor.daily_top_species` | Number of species, past 24 h | `detections` (ranked by 24h count) |
+| `sensor.daily_count` | Total detections today (true `/daily-count` volume; resets at the box's local midnight) | — (total counter) |
+| `sensor.daily_top_species` | Number of species today | `detections` (ranked by today's true `/daily-count` count) |
 | `sensor.yearly_top_species` | Number of species in the last 12 months | `detections` (ranked by 12-month count) |
 | `sensor.rarest_species` | Number of species, rolling 7 d | `detections` (ranked by rarity) |
 | `sensor.lifetime_species` | Distinct species ever detected on this box | — (plain count; `MEASUREMENT` state class for long-term statistics) |
@@ -42,7 +42,7 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 | `last_detection` | most recent event | `last_seen` desc |
 | `notable_species` | most notable | `notability_score` desc (rarity ↔ recency blend) |
 | `new_species` | most recently first-seen | `first_seen` desc |
-| `daily_top_species` | most detected in last 24 h | 24h `count` desc |
+| `daily_top_species` | most detected today | today's `count` desc |
 | `yearly_top_species` | most detected in the last 12 months | 12-month `count` |
 | `rarest_species` | rarest in last 7 days | `rarity_score` desc |
 

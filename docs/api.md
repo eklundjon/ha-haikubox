@@ -134,7 +134,7 @@ The cache is write-once-per-species:
 3. Otherwise, the JPEG is downloaded (`aiohttp` GET), written to `/config/www/haikubox/<sp_code>.jpeg` via `aiofiles`, and added to `_cached`.
 4. The species's `image_url` is rewritten to `/local/haikubox/<sp_code>.jpeg` — served by HA's own static handler, so it works offline once cached.
 
-If the S3 fetch fails (404, network error), `async_fetch` falls back to returning the remote S3 URL — the card shows the photo on first paint, and the next successful poll caches it. `url_for(sp_code)` (used by `_build_daily_list` / `_build_yearly_top` for non-1h-window species) applies the same fallback synchronously.
+If the S3 fetch fails (404, network error), `async_fetch` falls back to returning the remote S3 URL — the card shows the photo on first paint, and the next successful poll caches it. `url_for(sp_code)` (used by `_build_today_top` / `_build_baseline_top` for non-1h-window species) applies the same fallback synchronously.
 
 The cache directory is indexed once at integration startup (`async_init` → `_index`, single executor hop to scan `/config/www/haikubox/`). After that, every URL lookup is an in-memory set check.
 

@@ -69,7 +69,7 @@ Event data:
 | `image_url` | Photo URL for the species (may be absent). |
 | `last_seen` | Timestamp of this detection. |
 | `rarity_score` | Rarity vs. the box's rolling 12-month baseline. |
-| `yearly_rank` | Rank within the calendar-year baseline. |
+| `yearly_rank` | Rank within the rolling 12-month rarity baseline (1 = most common). The field name predates the rolling baseline and is kept for compatibility. |
 | `days_absent` | **`unusual_visitor` only** — days since the previous sighting. |
 
 In templates these are reached via `trigger.event.data.<field>` (for example
@@ -82,9 +82,8 @@ unheard. *N* defaults to **30 days** and is set per-box in **Settings →
 Devices & services → Haikubox → Configure → "Unusual visitor: days unheard."**
 
 The threshold is built on the integration's persisted last-seen history, so it
-measures the real gap since the species was last heard — and it's immune to the
-calendar-year reset that makes raw yearly rarity unreliable as an alerting
-signal.
+measures the real gap since the species was last heard — independent of the
+rarity baseline, which makes it a more reliable alerting signal than raw rarity.
 
 ## How the events stay quiet
 

@@ -162,7 +162,7 @@ Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `da
 | `_sp_codes: dict[str, str]` | `haikubox.<serial>.sp_codes` | `_load_stores` |
 | `_sci_names: dict[str, str]` | `haikubox.<serial>.sci_names` | `_load_stores` |
 | `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_load_stores` |
-| `_daily_counts: dict[str, dict[str, int]]` (full lifetime) — the derived `_yearly_ranks` / `_yearly_species_count` / `_yearly_items` are rebuilt from its trailing window | `haikubox.<serial>.daily_counts` | `_load_stores` (baseline rebuilt at load) |
+| `_daily_counts: dict[str, dict[str, int]]` (full lifetime) — the derived `_baseline_ranks` / `_baseline_species_count` / `_baseline_items` are rebuilt from its trailing window | `haikubox.<serial>.daily_counts` | `_load_stores` (baseline rebuilt at load) |
 | `_last_detected`, `_last_notable` | `haikubox.<serial>.sticky` | `_load_stores` |
 
 Each store is written **only when its data changes**, gated by a dirty flag. The sticky store, for example, only writes when the species shown by `last_detection` or `notable_species` actually changes — not on every poll.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_SERIAL, DOMAIN
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
@@ -137,8 +138,8 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
     Sourced from /daily-count (true per-species counts), not the ≤5-per-species
     /detections sample, so it reflects real volume (often thousands/day) rather
     than the old clamped ~120 (issue #44). It's a partial calendar day that
-    grows through the day and resets at UTC midnight. (True *hourly* volume
-    isn't available from the API — the only accurate grain is the calendar day.)
+    grows through the day and resets at the box's local midnight. (True *hourly*
+    volume isn't available from the API — the only accurate grain is the day.)
     """
 
     _attr_translation_key = "daily_count"
@@ -156,7 +157,9 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
 
 
 class HaikuboxDailyTopSpeciesSensor(_HaikuboxSensor):
-    """Top species by detection count over the trailing 24 hours."""
+    """Top species today by TRUE detection count (the calendar day, from
+    /daily-count — not the ≤5/species /detections sample). Display name
+    "Top species (today)"."""
 
     _attr_translation_key = "daily_top_species"
     _attr_icon = "mdi:chart-bar"
@@ -179,8 +182,8 @@ class HaikuboxDailyTopSpeciesSensor(_HaikuboxSensor):
 class HaikuboxNotableSpeciesSensor(_HaikuboxSensor):
     """Most unusual species detected in the recent window.
 
-    Rarity is measured against this box's own yearly baseline — a species
-    ranked low (or absent) in the yearly top-75 scores close to 1.0.
+    Rarity is measured against this box's own trailing-window baseline — a
+    species ranked low (or absent) in that baseline scores close to 1.0.
     State persists after the detection window empties.
     """
 
@@ -268,7 +271,11 @@ class HaikuboxNewSpeciesSensor(_HaikuboxSensor):
 
 
 class HaikuboxYearlyTopSpeciesSensor(_HaikuboxSensor):
-    """Top species by detection count this calendar year."""
+    """Top species by detection count over the trailing 12-month window.
+
+    (Sensor id / unique_id stay `yearly_top_species` for compatibility; the
+    baseline is a rolling window, not a calendar year — display name is
+    "Top species (last 12 months)".)"""
 
     _attr_translation_key = "yearly_top_species"
     _attr_icon = "mdi:chart-bar"
@@ -466,7 +473,10 @@ class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
         if not earliest:
             return None
         try:
-            return datetime.fromisoformat(earliest).replace(tzinfo=timezone.utc)
+            # `history_earliest` is a box-local calendar day; anchor the
+            # timestamp to the box's tz (HA's tz until it resolves).
+            tz = self.coordinator.box_timezone or dt_util.now().tzinfo
+            return datetime.fromisoformat(earliest).replace(tzinfo=tz)
         except ValueError:
             return None
 
@@ -476,7 +486,8 @@ class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
         span = None
         if earliest:
             try:
-                span = (datetime.now(timezone.utc).date() - date.fromisoformat(earliest)).days
+                today = dt_util.now(self.coordinator.box_timezone).date()
+                span = (today - date.fromisoformat(earliest)).days
             except ValueError:
                 span = None
         return {

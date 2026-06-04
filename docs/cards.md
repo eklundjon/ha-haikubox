@@ -154,7 +154,7 @@ Each row shows the species, its `#rank` (by that sensor's own measure — see th
 ```yaml
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_daily_top_species
-title: Top Species (24 h)
+title: Top species (today)
 row_size: large
 ```
 
@@ -185,10 +185,10 @@ grid_options:
   columns: 12
   rows: 6
 
-# Top species (24 h)
+# Top species (today)
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_daily_top_species
-title: Top Species (24 h)
+title: Top species (today)
 grid_options:
   columns: 12
   rows: 4
@@ -224,7 +224,7 @@ sections:
     cards:
       - type: custom:haikubox-bird-list-card
         entity: sensor.bird_shazam_daily_top_species
-        title: Top Species (24 h)
+        title: Top species (today)
         top: 10
   - type: grid
     cards:
@@ -272,7 +272,8 @@ The card renders `detections[0]` from its bound entity's `detections` attribute.
 Common causes by sensor:
 
 - **`last_detection`** — the box has been silent for >24 h. Check the box's connectivity and power.
-- **`notable_species`, `daily_top_species`** — same 24 h window; same cause if blank.
+- **`notable_species`** — trailing 24 h window; blank if nothing detected in 24 h.
+- **`daily_top_species`** — today's `/daily-count`; blank only before the first detection of the local day (or if that fetch is failing — check HA logs).
 - **`recent_detections`** — quiet hour. Normal during a sleeping-bird stretch.
 - **`new_species`** — would only be empty if `_seen_species` has never been populated (truly fresh install with API down on first poll). Look at HA logs.
 
