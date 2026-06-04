@@ -490,6 +490,14 @@ class HaikuboxBirdCard extends HTMLElement {
           text-align: center;
         }
 
+        /* Text block — centered in every layout (portrait and wide). */
+        .text-group {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 3px;
+        }
+
         /* Wide layout: image left, text right */
         @container (aspect-ratio > 3/2) {
           .layout { flex-direction: row; }
@@ -504,11 +512,8 @@ class HaikuboxBirdCard extends HTMLElement {
           .body {
             flex: 1 1 auto;
             min-height: 0;
-            align-items: flex-start;
-            text-align: left;
             padding: 16px 20px;
           }
-          .text-group { align-items: flex-start; }
         }
 
         /*
@@ -532,12 +537,6 @@ class HaikuboxBirdCard extends HTMLElement {
           }
         }
 
-        .text-group {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 3px;
-        }
         /*
          * Responsive type: sizes scale with the card via container-query
          * units (cqw/cqh) so the common name reads at a distance on large
