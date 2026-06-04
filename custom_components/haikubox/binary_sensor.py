@@ -38,7 +38,7 @@ class HaikuboxExtendedSilenceSensor(
     day. Surfacing it as a PROBLEM binary sensor lets users alert on it
     directly instead of inferring it from an empty card.
 
-    Derived from the 24-hour `daily_count` list the coordinator already
+    Derived from the 24-hour `detections_24h` list the coordinator already
     produces (empty list → no detections in 24 h). When the poll itself
     fails the coordinator goes unavailable, so this sensor is unavailable
     too — "we don't know" rather than a false problem.
@@ -69,4 +69,4 @@ class HaikuboxExtendedSilenceSensor(
     @property
     def is_on(self) -> bool:
         # PROBLEM semantics: on = something's wrong = nothing detected in 24 h.
-        return not (self.coordinator.data.get("daily_count") or [])
+        return not (self.coordinator.data.get("detections_24h") or [])
