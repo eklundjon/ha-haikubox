@@ -22,7 +22,6 @@ async def async_get_config_entry_diagnostics(
         "entry": async_redact_data(entry.as_dict(), TO_REDACT),
         "coordinator": {
             "last_update_success": coordinator.last_update_success,
-            "yearly_fetched_date": str(coordinator.yearly_fetched_date),
             "baseline_species_count": coordinator.baseline_species_count,
             "lifetime_species_count": coordinator.lifetime_species_count,
         },

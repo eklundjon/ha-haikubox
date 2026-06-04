@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_SERIAL, DOMAIN
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
@@ -472,7 +473,10 @@ class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
         if not earliest:
             return None
         try:
-            return datetime.fromisoformat(earliest).replace(tzinfo=timezone.utc)
+            # `history_earliest` is a box-local calendar day; anchor the
+            # timestamp to the box's tz (HA's tz until it resolves).
+            tz = self.coordinator.box_timezone or dt_util.now().tzinfo
+            return datetime.fromisoformat(earliest).replace(tzinfo=tz)
         except ValueError:
             return None
 
@@ -482,7 +486,8 @@ class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
         span = None
         if earliest:
             try:
-                span = (datetime.now(timezone.utc).date() - date.fromisoformat(earliest)).days
+                today = dt_util.now(self.coordinator.box_timezone).date()
+                span = (today - date.fromisoformat(earliest)).days
             except ValueError:
                 span = None
         return {
