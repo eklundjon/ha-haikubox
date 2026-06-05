@@ -37,7 +37,8 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       if (this._sizeField)  this._sizeField.value  = config.row_size ?? "small";
       if (this._ebirdField) this._ebirdField.value = !!config.show_ebird;
       if (this._aabField)   this._aabField.value   = !!config.show_allaboutbirds;
-      if (this._wikiField)  this._wikiField.value  = !!config.show_wikipedia;
+      if (this._mlField)    this._mlField.value    = !!config.show_macaulay;
+      if (this._descField)  this._descField.value  = config.show_description !== false;
     }
   }
 
@@ -53,7 +54,8 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       if (this._sizeField)  this._sizeField.hass  = hass;
       if (this._ebirdField) this._ebirdField.hass = hass;
       if (this._aabField)   this._aabField.hass   = hass;
-      if (this._wikiField)  this._wikiField.hass  = hass;
+      if (this._mlField)    this._mlField.hass    = hass;
+      if (this._descField)  this._descField.hass  = hass;
     }
   }
 
@@ -169,15 +171,25 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       aabField.addEventListener("value-changed", (e) => this._fire({ show_allaboutbirds: e.detail.value }));
       this._aabField = aabField;
 
-      const wikiField = document.createElement("ha-selector");
-      wikiField.label = "Wikipedia links in compact view";
-      wikiField.selector = { boolean: {} };
-      if (this._hass) wikiField.hass = this._hass;
-      wikiField.value = !!this._config?.show_wikipedia;
-      wikiField.addEventListener("value-changed", (e) => this._fire({ show_wikipedia: e.detail.value }));
-      this._wikiField = wikiField;
+      const mlField = document.createElement("ha-selector");
+      mlField.label = "Macaulay Library links in compact view";
+      mlField.selector = { boolean: {} };
+      if (this._hass) mlField.hass = this._hass;
+      mlField.value = !!this._config?.show_macaulay;
+      mlField.addEventListener("value-changed", (e) => this._fire({ show_macaulay: e.detail.value }));
+      this._mlField = mlField;
 
-      form.append(ebirdField, aabField, wikiField);
+      // Wikipedia description blurb in the detail view (default on). Fetched on
+      // demand from Wikipedia when a row is opened.
+      const descField = document.createElement("ha-selector");
+      descField.label = "Show description in detail view";
+      descField.selector = { boolean: {} };
+      if (this._hass) descField.hass = this._hass;
+      descField.value = this._config?.show_description !== false;
+      descField.addEventListener("value-changed", (e) => this._fire({ show_description: e.detail.value }));
+      this._descField = descField;
+
+      form.append(ebirdField, aabField, mlField, descField);
     }
 
     this.appendChild(form);
@@ -259,31 +271,74 @@ class HaikuboxBirdListCard extends HTMLElement {
     return `#${item.rank ?? index + 1}`;
   }
 
-  // External reference link anchors. eBird keys on the species code we
-  // already carry as sp_code; All About Birds keys on the common name
-  // with spaces → underscores (e.g. "Downy_Woodpecker", hyphens
-  // preserved). `ebird`/`aab` flags gate each; an anchor is skipped if
-  // its source field is missing. Returns "" when nothing applies.
-  // Reference links are surfaced by the integration as per-record URL fields
-  // (`ebird_url` / `allaboutbirds_url` / `wikipedia_url`) — the card just renders
-  // the ones present and enabled; it no longer constructs URLs itself. This is
-  // the shared link logic the Haikubox and BirdWeather cards converge on; each
-  // integration decides which URLs to surface.
-  _linkAnchors(item, ebird, aab, wiki) {
+  // External reference link anchors. Reference links are surfaced by the
+  // integration as per-record URL fields (`ebird_url` / `allaboutbirds_url` /
+  // `macaulay_url`) — the card just renders the ones present and enabled; it
+  // doesn't construct URLs itself. `f` is a flags object {ebird, aab, ml} gating
+  // each. Wikipedia is not a button — it's reached by tapping the description
+  // blurb. This is the shared link logic the Haikubox and BirdWeather cards
+  // converge on. Returns "" when nothing applies.
+  _linkAnchors(item, f) {
     const btn = (url, label) =>
       `<a class="link-btn" href="${_esc(url)}" target="_blank" rel="noreferrer noopener" title="${_esc(item.species)} on ${label}">${label}</a>`;
     const parts = [];
-    if (ebird && item.ebird_url) parts.push(btn(item.ebird_url, "eBird"));
-    if (aab && item.allaboutbirds_url) parts.push(btn(item.allaboutbirds_url, "All About Birds"));
-    if (wiki && item.wikipedia_url) parts.push(btn(item.wikipedia_url, "Wikipedia"));
+    if (f.ebird && item.ebird_url) parts.push(btn(item.ebird_url, "eBird"));
+    if (f.aab && item.allaboutbirds_url) parts.push(btn(item.allaboutbirds_url, "All About Birds"));
+    if (f.ml && item.macaulay_url) parts.push(btn(item.macaulay_url, "Macaulay Library"));
     return parts.join("");
   }
 
   // Wrap the requested anchors in a container, or "" if none. `cls`
-  // distinguishes the compact-row block from the roomy detail block.
-  _linksBlock(item, ebird, aab, wiki, cls) {
-    const anchors = this._linkAnchors(item, ebird, aab, wiki);
+  // distinguishes the compact-row block from the roomy detail block. `f` is a
+  // flags object {ebird, aab, ml}.
+  _linksBlock(item, f, cls) {
+    const anchors = this._linkAnchors(item, f);
     return anchors ? `<div class="${cls}">${anchors}</div>` : "";
+  }
+
+  // Lazily fetch a species' Wikipedia summary (REST API, CORS-enabled) when its
+  // detail row is open. Static metadata, so the integration doesn't poll/store
+  // it — the card fetches on demand and caches per species for the session. The
+  // article title is derived from the integration-supplied wikipedia_url, so the
+  // same logic works on any source that has one (Haikubox, BirdWeather). Fails
+  // silently (no blurb) when offline / unavailable.
+  _loadDescription(species, wikiUrl, el) {
+    if (!el || !wikiUrl) return;
+    this._descCache ??= new Map();
+    if (this._descCache.has(species)) {
+      el.textContent = this._descCache.get(species);
+      return;
+    }
+    let api;
+    try {
+      const u = new URL(wikiUrl);
+      const title = u.pathname.split("/wiki/")[1];
+      if (!title) return;
+      api = `${u.origin}/api/rest_v1/page/summary/${title}`;
+    } catch (_) {
+      return;
+    }
+    el.textContent = "…";
+    fetch(api, { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((j) => {
+        const text = j.extract || "";
+        this._descCache.set(species, text);
+        if (el.isConnected && el.dataset.species === species) el.textContent = text;
+      })
+      .catch(() => {
+        if (el.isConnected && el.dataset.species === species) el.textContent = "";
+      });
+  }
+
+  // Fetch the description for whichever row is currently open (only the open
+  // row's detail is visible, so we never fan out fetches across the whole list).
+  _maybeLoadDescription() {
+    if (!this._openSpecies || this._config?.show_description === false) return;
+    const el = this.shadowRoot?.querySelector(".item.is-open .detail-desc-text");
+    if (!el) return;
+    const item = this._items?.find((i) => i.species === this._openSpecies);
+    if (item?.wikipedia_url) this._loadDescription(item.species, item.wikipedia_url, el);
   }
 
   _relativeTime(isoString) {
@@ -445,13 +500,19 @@ class HaikuboxBirdListCard extends HTMLElement {
         .list.size-large .detail-name { font-size: 1.55em; }
         .list.size-large .detail-sci { font-size: 1.2em; }
 
-        /* External reference link buttons (eBird / All About Birds) */
+        /* External reference link buttons (eBird / All About Birds / Macaulay
+           Library). The species name takes priority: the cluster is capped and
+           allowed to shrink, so once it's wide enough the buttons stack into a
+           second/third row instead of squeezing the name. */
         .row-links {
           display: flex;
           flex-wrap: wrap;
           gap: 6px;
-          flex-shrink: 0;
+          flex-shrink: 1;
+          min-width: 0;
+          max-width: 50%;
           justify-content: flex-end;
+          align-content: center;
         }
         .link-btn {
           display: inline-flex;
@@ -536,6 +597,37 @@ class HaikuboxBirdListCard extends HTMLElement {
           color: var(--secondary-text-color);
           margin-bottom: 10px;
         }
+        /* Wikipedia summary blurb, fetched on demand when a row is opened. The
+           whole block is a link to the article — the clamped teaser plus a
+           persistent "Read more" cue so the affordance is discoverable on touch
+           (not just on hover). */
+        .detail-desc {
+          display: block;
+          margin-bottom: 10px;
+          text-decoration: none;
+          cursor: pointer;
+          color: var(--primary-text-color);
+        }
+        .detail-desc-text {
+          /* Cap very long extracts so the row doesn't grow unboundedly. */
+          display: -webkit-box;
+          -webkit-line-clamp: 4;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          font-size: 0.85em;
+          line-height: 1.45;
+          color: var(--primary-text-color);
+        }
+        .detail-desc::after {
+          content: "Read more on Wikipedia ›";
+          display: block;
+          margin-top: 3px;
+          font-size: 0.78em;
+          font-weight: 500;
+          color: var(--primary-color);
+        }
+        .detail-desc:hover::after,
+        .detail-desc:focus-visible::after { text-decoration: underline; }
         .detail-links {
           display: flex;
           flex-wrap: wrap;
@@ -587,7 +679,7 @@ class HaikuboxBirdListCard extends HTMLElement {
                       <div class="name">${_esc(item.species)}</div>
                       ${item.scientific_name ? `<div class="sub">${_esc(item.scientific_name)}</div>` : ""}
                     </div>
-                    ${this._linksBlock(item, this._config.show_ebird, this._config.show_allaboutbirds, this._config.show_wikipedia, "row-links")}
+                    ${this._linksBlock(item, { ebird: this._config.show_ebird, aab: this._config.show_allaboutbirds, ml: this._config.show_macaulay }, "row-links")}
                   </div>
                   <div class="detail">
                     ${item.image_url
@@ -596,11 +688,14 @@ class HaikuboxBirdListCard extends HTMLElement {
                     <div class="detail-text">
                       <div class="detail-name">${_esc(item.species)}</div>
                       ${item.scientific_name ? `<div class="detail-sci">${_esc(item.scientific_name)}</div>` : ""}
+                      ${this._config.show_description !== false && item.wikipedia_url
+                        ? `<a class="detail-desc" href="${_esc(item.wikipedia_url)}" target="_blank" rel="noreferrer noopener" title="Read more on Wikipedia"><span class="detail-desc-text" data-species="${_esc(item.species)}">${_esc(this._descCache?.get(item.species) ?? "")}</span></a>`
+                        : ""}
                       <div class="metrics">
                         ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
                         ${t ? `<div class="metric">last heard <strong data-last-seen="${_esc(item.last_seen)}">${_esc(t)}</strong></div>` : ""}
                       </div>
-                      ${this._linksBlock(item, true, true, true, "detail-links")}
+                      ${this._linksBlock(item, { ebird: true, aab: true, ml: true }, "detail-links")}
                     </div>
                   </div>
                 </div>
@@ -643,6 +738,9 @@ class HaikuboxBirdListCard extends HTMLElement {
         img.replaceWith(placeholder);
       });
     });
+
+    // An open row survived this re-render (re-ordered list) — (re)load its blurb.
+    this._maybeLoadDescription();
   }
 
   // Toggle an item between its compact and detail views in place (the
@@ -664,6 +762,7 @@ class HaikuboxBirdListCard extends HTMLElement {
     // Remember the open species so it survives the next poll re-render —
     // the list re-orders, so track species not index.
     this._openSpecies = opening ? species : null;
+    if (opening) this._maybeLoadDescription();
   }
 
   getCardSize() {

@@ -579,14 +579,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _links_for(self, species: str, sp_code: str, scientific_name: str) -> dict[str, Any]:
         """Reference-link URLs for a record, surfaced by the integration so the
         cards just render them (no URL construction in the card). Haikubox has
-        no upstream URLs, so all three are templated: eBird from the species
-        code, All About Birds from the common name (both share eBird's
+        no upstream URLs, so all are templated: eBird and Macaulay Library from
+        the species code, All About Birds from the common name (all share eBird's
         taxonomy), and Wikipedia from the scientific name (binomials resolve
         reliably via Wikipedia redirects)."""
         return {
             "ebird_url": _ebird_url(sp_code),
             "wikipedia_url": _wikipedia_url(scientific_name),
             "allaboutbirds_url": _allaboutbirds_url(species),
+            "macaulay_url": _ml_url(sp_code),
         }
 
     def _with_links(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1364,6 +1365,15 @@ def _apply_notability_scores(
 
 def _ebird_url(sp_code: str | None) -> str | None:
     return f"https://ebird.org/species/{sp_code}" if sp_code else None
+
+
+def _ml_url(sp_code: str | None) -> str | None:
+    # Macaulay Library catalog keys on the eBird species code (taxonCode).
+    return (
+        f"https://search.macaulaylibrary.org/catalog?taxonCode={sp_code}"
+        if sp_code
+        else None
+    )
 
 
 def _allaboutbirds_url(species: str | None) -> str | None:

@@ -14,7 +14,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 - **New species** — flags species appearing for the first time ever on your box; lifetime log survives restarts
 - **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
 - **Bird details sensors** — top species (last 12 months), top species (last 24 h), rarest species (7 d)
-- **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views and optional per-row links to eBird, Wikipedia, and All About Birds
+- **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views, optional per-row links to eBird, All About Birds, and Macaulay Library, and a Wikipedia description (tap to read the full article) in the expanded detail
 - **Automations** — device triggers for new-species, unusual-visitor, and watched-species detections, plus blueprints for photo push notifications
 - **Watched species** — choose species to be alerted about (a pick-list of ones your box has detected, plus free text for ones it hasn't); fires a device trigger when one is heard, and lists them in a "Birds of interest" sensor
 - Bird photos cached locally for offline resilience
