@@ -461,9 +461,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # every case EXCEPT last_detection.detections (= recent_events
             # below), which is per-event — same field shape, but the same
             # species can appear multiple times.
-            "recent_detections": _ranked(detections),       # by recency
+            "recent_detections": _ranked(self._with_links(detections)),  # by recency
             "last_detection": self._last_detected,           # sticky
-            "recent_events": _ranked(recent_events),         # per-event by dt desc
+            "recent_events": _ranked(self._with_links(recent_events)),  # per-event by dt desc
             "notable_detection": self._last_notable,         # sticky
             # Capped (≤5/species) trailing-24h list from /detections. NOT the
             # daily_count *sensor's* value (that's today_total) — hence the
@@ -471,19 +471,19 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # extended-silence emptiness check and rarest's "seen today"
             # membership, both of which only need presence, not true counts.
             "detections_24h": daily_count,
-            "daily_top_species": _ranked(self._build_today_top(today_species)),  # true counts, today
-            "notable_detections": _ranked(notable),          # by rarity
+            "daily_top_species": _ranked(self._with_links(self._build_today_top(today_species))),  # true counts, today
+            "notable_detections": _ranked(self._with_links(notable)),          # by rarity
             # Sticky lifetime-history list (N most recently first-seen
             # species, newest first). Derived from _seen_species, not from
             # the current poll's new arrivals — populated on a fresh box
             # as soon as the bootstrap fills _seen_species, and stays
             # populated forever after.
-            "new_detections": _ranked(self._build_new_species_history()),
+            "new_detections": _ranked(self._with_links(self._build_new_species_history())),
             "new_detection": self._build_last_new_species(), # sticky
             "lifetime_species_count": len(self._seen_species),
-            "yearly_top_species": self._build_baseline_top(),  # by trailing-window count (own rank)
-            "rarest_species": _ranked(seven_day_rare),       # by rarity
-            "watched_species": _ranked(self._build_watched()),  # user watch-list, by recency
+            "yearly_top_species": self._with_links(self._build_baseline_top()),  # by trailing-window count (own rank)
+            "rarest_species": _ranked(self._with_links(seven_day_rare)),       # by rarity
+            "watched_species": _ranked(self._with_links(self._build_watched())),  # user watch-list, by recency
             "today_total": today_total,                       # true daily total (/daily-count)
             "today_species": today_species,                   # true per-species map (diversity)
             "typical_daily_count": typical_daily,             # mean active completed-day total
@@ -575,6 +575,29 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Species this box has been seen to detect (for the watch-list picker
         in the options flow), sorted alphabetically."""
         return sorted(self._seen_species)
+
+    def _links_for(self, species: str, sp_code: str, scientific_name: str) -> dict[str, Any]:
+        """Reference-link URLs for a record, surfaced by the integration so the
+        cards just render them (no URL construction in the card). Haikubox has
+        no upstream URLs, so all three are templated: eBird from the species
+        code, All About Birds from the common name (both share eBird's
+        taxonomy), and Wikipedia from the scientific name (binomials resolve
+        reliably via Wikipedia redirects)."""
+        return {
+            "ebird_url": _ebird_url(sp_code),
+            "wikipedia_url": _wikipedia_url(scientific_name),
+            "allaboutbirds_url": _allaboutbirds_url(species),
+        }
+
+    def _with_links(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Stamp eBird / Wikipedia / All About Birds URLs onto each record."""
+        for r in records:
+            r.update(
+                self._links_for(
+                    r.get("species", ""), r.get("sp_code", ""), r.get("scientific_name", "")
+                )
+            )
+        return records
 
     def _fire_event(
         self, trigger_type: str, record: dict[str, Any], **extra: Any
@@ -1337,6 +1360,25 @@ def _apply_notability_scores(
         d["notability_score"] = round(
             rarity_weight * rarity + recency_weight * recency, 4
         )
+
+
+def _ebird_url(sp_code: str | None) -> str | None:
+    return f"https://ebird.org/species/{sp_code}" if sp_code else None
+
+
+def _allaboutbirds_url(species: str | None) -> str | None:
+    # allaboutbirds.org guide URLs key on the common name (spaces → underscores).
+    return f"https://www.allaboutbirds.org/guide/{species.replace(' ', '_')}" if species else None
+
+
+def _wikipedia_url(scientific_name: str | None) -> str | None:
+    # Template from the binomial: Wikipedia near-universally redirects a
+    # scientific name to the species article (verified ~100% vs the common
+    # name's ~91%, which drifts on vernacular-name differences and
+    # disambiguation pages).
+    if not scientific_name:
+        return None
+    return f"https://en.wikipedia.org/wiki/{scientific_name.replace(' ', '_')}"
 
 
 def _ranked(records: list[dict[str, Any]]) -> list[dict[str, Any]]:

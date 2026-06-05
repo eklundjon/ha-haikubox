@@ -140,6 +140,7 @@ top: 10                        # max items to render (default: 10)
 row_size: small                # small | medium | large (default: small)
 show_ebird: false              # eBird links in compact view (default: false)
 show_allaboutbirds: false      # All About Birds links in compact view (default: false)
+show_wikipedia: false          # Wikipedia links in compact view (default: false)
 grid_options:
   columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
@@ -160,10 +161,10 @@ row_size: large
 
 ### Reference link buttons
 
-Each row can link out to the bird's external species page on eBird and All About Birds (the same two references the Haikubox app uses). eBird keys on the species code the integration already carries; All About Birds keys on the common name. Links open in a new tab and don't toggle the row when clicked.
+Each row can link out to the bird's external species page on **eBird**, **All About Birds**, and **Wikipedia**. The integration surfaces the URLs (eBird from the species code, All About Birds from the common name, Wikipedia from the scientific name) and the card just renders them. Links open in a new tab and don't toggle the row when clicked.
 
-- **Expanded detail view — always shown.** Tap any row to expand it in place; both reference links appear in the detail view. No configuration needed.
-- **Compact row — opt-in.** `show_ebird` and `show_allaboutbirds` (default `false`, also toggles in the visual editor) add the buttons directly to the always-visible compact row. Handy on a wide card; leave them off on a narrow card to avoid crowding the species name — the links are still one tap away in the detail view.
+- **Expanded detail view — always shown.** Tap any row to expand it in place; all available reference links appear in the detail view. No configuration needed.
+- **Compact row — opt-in.** `show_ebird`, `show_allaboutbirds`, and `show_wikipedia` (default `false`, also toggles in the visual editor) add the buttons directly to the always-visible compact row. Handy on a wide card; leave them off on a narrow card to avoid crowding the species name — the links are still one tap away in the detail view.
 
 ```yaml
 type: custom:haikubox-bird-list-card
