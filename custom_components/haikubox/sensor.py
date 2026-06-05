@@ -44,6 +44,7 @@ async def async_setup_entry(
             HaikuboxActivitySensor(coordinator, serial),
             HaikuboxNewSpeciesMomentumSensor(coordinator, serial),
             HaikuboxHistoryDepthSensor(coordinator, serial),
+            HaikuboxWatchedSpeciesSensor(coordinator, serial),
         ]
     )
 
@@ -495,3 +496,30 @@ class HaikuboxHistoryDepthSensor(_HaikuboxSensor):
             "days_span": span,
             "backfill_complete": self.coordinator.data.get("history_complete", False),
         }
+
+
+class HaikuboxWatchedSpeciesSensor(_HaikuboxSensor):
+    """Your watch-list species that this box has detected ("Birds of
+    interest"), most-recently-heard first. State = how many are on record;
+    `detections` is the list for the bird-list card. Configure the watch-list
+    in the integration's options. Species you watch but the box hasn't
+    recorded don't appear here — the watched-species device trigger covers
+    their arrival.
+    """
+
+    _attr_translation_key = "watched_species"
+    _attr_icon = "mdi:star"
+    _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_watched_species"
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.get("watched_species", []))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"detections": self.coordinator.data.get("watched_species", [])}

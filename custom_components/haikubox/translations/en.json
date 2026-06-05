@@ -34,14 +34,18 @@
     "step": {
       "init": {
         "title": "Haikubox options",
-        "description": "Tune the “notable species” ranking and the unusual-visitor alert.",
+        "description": "Tune the “notable species” ranking, the unusual-visitor alert, and the species you want to be alerted about.",
         "data": {
           "notable_rarity_weight": "Notability: % weight toward rarity",
-          "absence_days": "Unusual visitor: days unheard"
+          "absence_days": "Unusual visitor: days unheard",
+          "watched_species": "Watch species (detected here)",
+          "watched_species_extra": "Also watch (one name per line)"
         },
         "data_description": {
           "notable_rarity_weight": "100% = pure rarity; 0% = pure recency. Default 70% leans toward rarity with a small recency nudge.",
-          "absence_days": "How long a known species must have gone unheard before it counts as an unusual visitor (the unusual_visitor automation trigger). Default 30 days."
+          "absence_days": "How long a known species must have gone unheard before it counts as an unusual visitor (the unusual_visitor automation trigger). Default 30 days.",
+          "watched_species": "Pick from species your box has already detected. A “watched species detected” device trigger fires when one is heard.",
+          "watched_species_extra": "Add species your box hasn’t recorded yet (e.g. a hoped-for visitor) — one common name per line, exactly as the Haikubox app spells it."
         }
       }
     }
@@ -49,7 +53,8 @@
   "device_automation": {
     "trigger_type": {
       "new_species": "New species detected",
-      "unusual_visitor": "Unusual visitor detected"
+      "unusual_visitor": "Unusual visitor detected",
+      "watched_species": "Watched species detected"
     }
   },
   "entity": {
@@ -92,6 +97,9 @@
       },
       "history_start": {
         "name": "Detection history start"
+      },
+      "watched_species": {
+        "name": "Watched species"
       }
     },
     "binary_sensor": {

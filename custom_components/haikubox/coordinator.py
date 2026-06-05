@@ -26,6 +26,8 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
+    CONF_WATCHED_EXTRA,
+    CONF_WATCHED_SPECIES,
     DAILY_WINDOW_HOURS,
     DEFAULT_ABSENCE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
@@ -43,6 +45,7 @@ from .const import (
     RECENT_WINDOW_HOURS,
     TRIGGER_NEW_SPECIES,
     TRIGGER_UNUSUAL_VISITOR,
+    TRIGGER_WATCHED_SPECIES,
 )
 from .image_cache import ImageCache
 
@@ -480,6 +483,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lifetime_species_count": len(self._seen_species),
             "yearly_top_species": self._build_baseline_top(),  # by trailing-window count (own rank)
             "rarest_species": _ranked(seven_day_rare),       # by rarity
+            "watched_species": _ranked(self._build_watched()),  # user watch-list, by recency
             "today_total": today_total,                       # true daily total (/daily-count)
             "today_species": today_species,                   # true per-species map (diversity)
             "typical_daily_count": typical_daily,             # mean active completed-day total
@@ -546,7 +550,31 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         days_absent=days_absent,
                     )
 
+        # watched_species — a user-chosen species entered the recent window.
+        # Edge-gated against the previous poll (fires on appearance, not every
+        # poll while it lingers) and silent on the first poll, like the others.
+        # A newly-seen species that's also watched fires both events — both true.
+        watched = self._watched_species()
+        if watched and self._prev_recent_species is not None:
+            for sp in current_recent - self._prev_recent_species:
+                if sp.casefold() in watched:
+                    self._fire_event(TRIGGER_WATCHED_SPECIES, by_species[sp])
+
         self._prev_recent_species = current_recent
+
+    def _watched_species(self) -> set[str]:
+        """Case-folded set of common names to watch, from the options flow:
+        the pick-list selections plus the free-text list (one name per line)."""
+        opts = self.config_entry.options
+        names = list(opts.get(CONF_WATCHED_SPECIES) or [])
+        names += [ln.strip() for ln in (opts.get(CONF_WATCHED_EXTRA) or "").splitlines()]
+        return {n.casefold() for n in names if n.strip()}
+
+    @property
+    def known_species(self) -> list[str]:
+        """Species this box has been seen to detect (for the watch-list picker
+        in the options flow), sorted alphabetically."""
+        return sorted(self._seen_species)
 
     def _fire_event(
         self, trigger_type: str, record: dict[str, Any], **extra: Any
@@ -948,6 +976,34 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         new-species history list."""
         history = self._build_new_species_history()
         return history[0] if history else None
+
+    def _build_watched(self) -> list[dict[str, Any]]:
+        """Watch-list species this box has detected, most-recently-heard first —
+        powers the "Birds of interest" list card. Watched species the box has
+        never recorded aren't listed (nothing to render); they're still covered
+        by the watched_species device trigger when they arrive."""
+        watched = self._watched_species()
+        if not watched:
+            return []
+        denom = max(self._baseline_species_count, 1)
+        result: list[dict[str, Any]] = []
+        for species in self._seen_species:
+            if species.casefold() not in watched:
+                continue
+            sp_code = self._sp_code_for(species)
+            rank = self._baseline_ranks.get(species, self._baseline_species_count)
+            result.append({
+                "species": species,
+                "scientific_name": self._sci_name_for(species),
+                "sp_code": sp_code,
+                "image_url": self._images.url_for(sp_code),
+                "last_seen": self._last_seen.get(species),
+                "first_seen": self._seen_species.get(species),
+                "rarity_score": round(rank / denom, 4),
+                "yearly_rank": rank,
+            })
+        result.sort(key=lambda x: x.get("last_seen") or "", reverse=True)
+        return result
 
     # ------------------------------------------------------------------
     # Public properties (used by diagnostics)

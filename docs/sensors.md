@@ -15,6 +15,7 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.yearly_top_species` | Number of species in the last 12 months | `detections` (ranked by 12-month count) |
 | `sensor.rarest_species` | Number of species, rolling 7 d | `detections` (ranked by rarity) |
 | `sensor.lifetime_species` | Distinct species ever detected on this box | — (plain count; `MEASUREMENT` state class for long-term statistics) |
+| `sensor.watched_species` | How many of your watch-list species the box has recorded | `detections` (your watched species, most-recently-heard first). Configure the watch-list in the integration's options; pairs with the **Watched species detected** trigger. |
 
 ### `sensor.lifetime_species`
 
