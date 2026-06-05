@@ -140,13 +140,14 @@ top: 10                        # max items to render (default: 10)
 row_size: small                # small | medium | large (default: small)
 show_ebird: false              # eBird links in compact view (default: false)
 show_allaboutbirds: false      # All About Birds links in compact view (default: false)
-show_wikipedia: false          # Wikipedia links in compact view (default: false)
+show_macaulay: false           # Macaulay Library links in compact view (default: false)
+show_description: true         # Wikipedia description in the detail view (default: true)
 grid_options:
   columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
 ```
 
-Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table), photo, and scientific name. **Tap a row** and it expands in place — the compact row is replaced by a detail view with a larger photo, the scientific name, `count×` and a "last heard" timestamp where the sensor provides them, and reference links (see below). Tap again to collapse. Only one row is open at a time.
+Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table), photo, and scientific name. **Tap a row** and it expands in place — the compact row is replaced by a detail view with a larger photo, the scientific name, a short Wikipedia description (tap it to open the full article), `count×` and a "last heard" timestamp where the sensor provides them, and reference links (see below). Tap again to collapse. Only one row is open at a time.
 
 ### Row size
 
@@ -161,10 +162,10 @@ row_size: large
 
 ### Reference link buttons
 
-Each row can link out to the bird's external species page on **eBird**, **All About Birds**, and **Wikipedia**. The integration surfaces the URLs (eBird from the species code, All About Birds from the common name, Wikipedia from the scientific name) and the card just renders them. Links open in a new tab and don't toggle the row when clicked.
+Each row can link out to the bird's external species page on **eBird**, **All About Birds**, and the **Macaulay Library**. The integration surfaces the URLs (all templated from the species code / common name) and the card just renders them. Links open in a new tab and don't toggle the row when clicked. (**Wikipedia** isn't a button — it's reached by tapping the description blurb in the detail view; see below.)
 
 - **Expanded detail view — always shown.** Tap any row to expand it in place; all available reference links appear in the detail view. No configuration needed.
-- **Compact row — opt-in.** `show_ebird`, `show_allaboutbirds`, and `show_wikipedia` (default `false`, also toggles in the visual editor) add the buttons directly to the always-visible compact row. Handy on a wide card; leave them off on a narrow card to avoid crowding the species name — the links are still one tap away in the detail view.
+- **Compact row — opt-in.** `show_ebird`, `show_allaboutbirds`, and `show_macaulay` (default `false`, also toggles in the visual editor) add the buttons directly to the always-visible compact row. Handy on a wide card; leave them off on a narrow card — they wrap below the name rather than crowding it, and the links are still one tap away in the detail view.
 
 ```yaml
 type: custom:haikubox-bird-list-card
@@ -172,7 +173,12 @@ entity: sensor.bird_shazam_rarest_species
 title: Rarest species (7 d)
 show_ebird: true            # eBird button on the compact row too
 show_allaboutbirds: true    # All About Birds button on the compact row too
+show_macaulay: true         # Macaulay Library button on the compact row too
 ```
+
+### Species description
+
+The detail view shows a short **Wikipedia** description, fetched on demand the first time you open a species' row (and cached for the session). Tap it — or the "Read more on Wikipedia ›" cue beneath it — to open the full article in a new tab. Turn it off with `show_description: false` (also a toggle in the visual editor); doing so also removes the only Wikipedia link from the card.
 
 Point it at any list-bearing sensor:
 
