@@ -17,6 +17,12 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
 )
 
 from .const import (
@@ -25,6 +31,8 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
+    CONF_WATCHED_EXTRA,
+    CONF_WATCHED_SPECIES,
     DEFAULT_ABSENCE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DOMAIN,
@@ -146,6 +154,17 @@ class HaikuboxOptionsFlow(OptionsFlow):
         )
         current_absence = opts.get(CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS)
 
+        # Watch-list picker: union of species the box has detected with any
+        # already-saved selections (so a saved name that's since dropped off the
+        # seen list isn't silently lost from the dropdown).
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        known = coordinator.known_species if coordinator else []
+        saved = opts.get(CONF_WATCHED_SPECIES) or []
+        watch_options = [
+            SelectOptionDict(value=n, label=n)
+            for n in sorted(set(known) | set(saved))
+        ]
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -174,6 +193,20 @@ class HaikuboxOptionsFlow(OptionsFlow):
                             unit_of_measurement="days",
                         )
                     ),
+                    vol.Optional(
+                        CONF_WATCHED_SPECIES, default=saved
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=watch_options,
+                            multiple=True,
+                            custom_value=False,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_WATCHED_EXTRA,
+                        default=opts.get(CONF_WATCHED_EXTRA, ""),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
                 }
             ),
         )

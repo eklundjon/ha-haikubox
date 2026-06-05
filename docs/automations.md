@@ -7,13 +7,14 @@ photo.
 
 ## Device triggers (the easy path)
 
-Every Haikubox device offers two triggers under **Settings → Automations →
+Every Haikubox device offers these triggers under **Settings → Automations →
 Create → When → Device**:
 
 | Trigger | Fires when |
 | --- | --- |
 | **New species detected** | A species is heard on this box for the **first time ever** — a genuine lifetime first. |
 | **Unusual visitor detected** | A species the box already knows **returns after a long absence** (default 30 days unheard; see [Tuning](#tuning-the-unusual-visitor-threshold)). |
+| **Watched species detected** | A species **you chose to watch** is heard. Pick the species in **Settings → Devices & Services → Haikubox → Configure** (a list of ones your box has detected, plus a free-text box for ones it hasn't yet). |
 
 Pick the box, pick the trigger, and add whatever actions you like. The trigger
 makes the detection's details available to your actions through the event data
@@ -59,7 +60,7 @@ Event data:
 
 | Field | Description |
 | --- | --- |
-| `type` | `new_species` or `unusual_visitor` — which trigger this is. |
+| `type` | `new_species`, `unusual_visitor`, or `watched_species` — which trigger this is. |
 | `device_id` | HA device-registry id of the Haikubox (what the device trigger filters on). |
 | `serial` | The Haikubox serial. |
 | `device_name` | Friendly name of the box. |
