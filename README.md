@@ -16,6 +16,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 - **Bird details sensors** — top species (last 12 months), top species (last 24 h), rarest species (7 d)
 - **Historical trends (no Grafana)** — backfills Home Assistant's native long-term **Statistics** with your box's *true* daily history (detections per day, species per day) — your whole recorded history, often years — so HA's built-in Statistics graph card shows real long-term trends out of the box
 - **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views, optional per-row links to eBird, All About Birds, and Macaulay Library, and a Wikipedia description (tap to read the full article) in the expanded detail
+- **Play the call** — a play button on the bird card and in the list card's detail plays the detection's recording in the browser. The source clips expire after ~1 hour, so the integration caches them locally: the headline detections (last + notable) are always kept for 30 days; an option lets power users cache the full recent feed for longer (off by default, to stay light on the Haikubox API)
 - **Automations** — device triggers for new-species, unusual-visitor, and watched-species detections, plus blueprints for photo push notifications
 - **Watched species** — choose species to be alerted about (a pick-list of ones your box has detected, plus free text for ones it hasn't); fires a device trigger when one is heard, and lists them in a "Birds of interest" sensor
 - Bird photos cached locally for offline resilience

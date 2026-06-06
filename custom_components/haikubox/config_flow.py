@@ -28,12 +28,14 @@ from homeassistant.helpers.selector import (
 from .const import (
     API_BASE,
     CONF_ABSENCE_DAYS,
+    CONF_AUDIO_CACHE_DAYS,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
     CONF_WATCHED_EXTRA,
     CONF_WATCHED_SPECIES,
     DEFAULT_ABSENCE_DAYS,
+    DEFAULT_AUDIO_CACHE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DOMAIN,
 )
@@ -153,6 +155,7 @@ class HaikuboxOptionsFlow(OptionsFlow):
             CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
         )
         current_absence = opts.get(CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS)
+        current_audio_days = opts.get(CONF_AUDIO_CACHE_DAYS, DEFAULT_AUDIO_CACHE_DAYS)
 
         # Watch-list picker: union of species the box has detected with any
         # already-saved selections (so a saved name that's since dropped off the
@@ -188,6 +191,18 @@ class HaikuboxOptionsFlow(OptionsFlow):
                         NumberSelectorConfig(
                             min=1,
                             max=365,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="days",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_AUDIO_CACHE_DAYS,
+                        default=current_audio_days,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=90,
                             step=1,
                             mode=NumberSelectorMode.BOX,
                             unit_of_measurement="days",

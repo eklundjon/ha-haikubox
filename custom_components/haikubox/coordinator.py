@@ -24,6 +24,7 @@ from .const import (
     BACKFILL_REQUEST_DELAY,
     BACKFILL_STOP_AFTER_404,
     CONF_ABSENCE_DAYS,
+    CONF_AUDIO_CACHE_DAYS,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
@@ -31,13 +32,16 @@ from .const import (
     CONF_WATCHED_SPECIES,
     DAILY_WINDOW_HOURS,
     DEFAULT_ABSENCE_DAYS,
+    DEFAULT_AUDIO_CACHE_DAYS,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     EVENT_HAIKUBOX,
+    HEADLINE_AUDIO_DAYS,
     HISTORY_BACKFILL_CHUNK,
     IMAGES_BASE,
     LAST_DETECTION_EVENT_LIMIT,
+    MAX_AUDIO_CLIPS,
     NEW_SPECIES_HISTORY_LIMIT,
     NEW_SPECIES_WINDOW_DAYS,
     NOTABILITY_WINDOW_HOURS,
@@ -48,6 +52,7 @@ from .const import (
     TRIGGER_UNUSUAL_VISITOR,
     TRIGGER_WATCHED_SPECIES,
 )
+from .audio_cache import AudioCache
 from .image_cache import ImageCache
 
 _LOGGER = logging.getLogger(__name__)
@@ -155,6 +160,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Species photo cache (downloads once, serves from /local/)
         self._images = ImageCache(hass, self._session)
+        # Detection-audio cache (downloads recent clips, serves from /local/)
+        self._audio = AudioCache(hass, self._session)
+        # Per-poll map: species code → its most-recent clip URL (for audio resolve)
+        self._latest_wav_by_species: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # DataUpdateCoordinator interface
@@ -223,6 +232,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # detections-in-last-hour, not detections-in-last-24h.
         recent_threshold = datetime.now(timezone.utc) - timedelta(hours=RECENT_WINDOW_HOURS)
         recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
+
+        # Map each species → its most-recent clip URL (a ~1h presigned FLAC).
+        # The audio cache/resolve below works off this; empty when audio is
+        # unavailable (or in the offline smoke), which short-circuits it.
+        self._latest_wav_by_species = _latest_wav_by_species(daily_raw)
 
         detections = _normalise_detections(recent_raw)
         _apply_rarity_scores(detections, self._baseline_ranks, self._baseline_species_count)
@@ -450,6 +464,36 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # poll's qualifying species, then advance the recent-window baseline.
         self._fire_detection_events(detections, newly_seen, prior_last_seen)
 
+        # Detection audio: download clips while their ~1h presigned URLs are
+        # fresh, then prune. ALWAYS cache the headline records (last + notable)
+        # — a couple of clips/poll, gentle on Haikubox's API — kept for
+        # HEADLINE_AUDIO_DAYS. With audio_cache_days > 0, ALSO cache the full
+        # recent feed for that many days (power users; heavier download). The
+        # retention floor is the headline window. _with_links resolves the
+        # stable /local audio_url; the signed source URL is never stored.
+        if self._latest_wav_by_species:
+            full_days = self.config_entry.options.get(
+                CONF_AUDIO_CACHE_DAYS, DEFAULT_AUDIO_CACHE_DAYS
+            )
+            if full_days > 0:
+                for wav in self._latest_wav_by_species.values():
+                    await self._audio.async_fetch(wav)
+                for ev in recent_events:
+                    if ev.get("wav"):
+                        await self._audio.async_fetch(ev["wav"])
+            else:
+                headline = {
+                    (self._last_detected or {}).get("sp_code"),
+                    (self._last_notable or {}).get("sp_code"),
+                }
+                for code in headline:
+                    wav = self._latest_wav_by_species.get(code)
+                    if wav:
+                        await self._audio.async_fetch(wav)
+            await self._audio.async_prune(
+                max(HEADLINE_AUDIO_DAYS, full_days), MAX_AUDIO_CLIPS
+            )
+
         # Today's TRUE per-species counts. The /detections feed is only a
         # ≤5-per-species recency sample, so daily *volume* and diversity must
         # come from /daily-count (the same source as the rarity baseline).
@@ -607,13 +651,19 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     def _with_links(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Stamp eBird / Wikipedia / All About Birds URLs onto each record."""
+        """Stamp eBird / Wikipedia / All About Birds URLs and the cached
+        `audio_url` onto each record. Audio resolves to a stable /local path if
+        the clip is cached (per-event records carry their own transient `wav`;
+        per-species records use that species' most-recent clip); the raw signed
+        URL is stripped so it never reaches HA state."""
         for r in records:
             r.update(
                 self._links_for(
                     r.get("species", ""), r.get("sp_code", ""), r.get("scientific_name", "")
                 )
             )
+            wav = r.pop("wav", None) or self._latest_wav_by_species.get(r.get("sp_code", ""))
+            r["audio_url"] = self._audio.url_for(wav) if self._audio else None
         return records
 
     def _fire_event(
@@ -702,6 +752,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ).async_remove()
 
         await self._images.async_init()
+        await self._audio.async_init()
 
         # Preload the bundled eBird-code fallback map off the event loop, so
         # the synchronous _sp_code_for() lookups during a poll never touch disk.
@@ -1251,6 +1302,28 @@ def _filter_by_dt(raw: Any, threshold: datetime) -> list[dict[str, Any]]:
     return out
 
 
+def _latest_wav_by_species(raw: Any) -> dict[str, str]:
+    """Map species code → the `wav` (presigned clip URL) of its most-recent
+    detection in the raw payload. Per-species records resolve audio against
+    this (their record is that species' latest detection)."""
+    out: dict[str, tuple[str, str]] = {}  # spCode → (dt, wav)
+    items = raw.get("detections", []) if isinstance(raw, dict) else []
+    if not isinstance(items, list):
+        return {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        code = item.get("spCode")
+        wav = item.get("wav")
+        if not code or not wav or code == "soundscape":
+            continue
+        dt = item.get("dt") or ""
+        cur = out.get(code)
+        if cur is None or dt > cur[0]:
+            out[code] = (dt, wav)
+    return {code: wav for code, (dt, wav) in out.items()}
+
+
 def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
     """Collapse the flat detections list into one record per species.
 
@@ -1543,6 +1616,7 @@ def _build_recent_events(
             "sp_code": sp_code,
             "image_url": image_url_for(sp_code),
             "last_seen": dt_str,
+            "wav": item.get("wav"),  # transient; resolved to audio_url in _with_links
             "rarity_score": round(rank / denom, 4),
             "yearly_rank": rank,
         })

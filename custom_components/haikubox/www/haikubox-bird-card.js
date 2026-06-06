@@ -41,6 +41,7 @@ class HaikuboxBirdCardEditor extends HTMLElement {
         this._pathField.value = this._pathValue;
         this._syncPathField();
       }
+      if (this._audioField) this._audioField.value = config.show_audio !== false;
     }
   }
 
@@ -187,6 +188,18 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       this._pathField = path;
       this.appendChild(path);
       this._syncPathField();
+
+      // "Play the call" toggle (default on). Adds a play button over the photo
+      // that plays the detection's recording (cached locally) in the browser.
+      const audio = document.createElement("ha-selector");
+      audio.label = "Show play-call button";
+      audio.selector = { boolean: {} };
+      if (this._hass) audio.hass = this._hass;
+      audio.value = this._config?.show_audio !== false;
+      audio.style.cssText = "display:block;padding:0 16px 16px";
+      audio.addEventListener("value-changed", (e) => this._fire({ show_audio: e.detail.value }));
+      this._audioField = audio;
+      this.appendChild(audio);
     }
   }
 }
@@ -270,6 +283,35 @@ class HaikuboxBirdCard extends HTMLElement {
     }
     // Close a list popup if the card is torn down while it's open.
     if (this._popupDialog) this._popupDialog.close();
+    if (this._audio) {
+      this._audio.pause();
+      this._audio = null;
+    }
+  }
+
+  // Play/pause the detection's recording in the browser (one Audio instance).
+  // Failures (unavailable / unsupported) fall back to the play glyph.
+  _togglePlay(btn) {
+    const url = btn.dataset.audio;
+    if (!url) return;
+    if (this._playingBtn === btn && this._audio && !this._audio.paused) {
+      this._audio.pause();
+      return;
+    }
+    if (this._audio) this._audio.pause();
+    const audio = new Audio(url);
+    this._audio = audio;
+    this._playingBtn = btn;
+    const reset = () => {
+      btn.textContent = "▶";
+      btn.classList.remove("playing");
+    };
+    audio.addEventListener("ended", reset);
+    audio.addEventListener("pause", reset);
+    audio.addEventListener("error", reset);
+    btn.textContent = "⏸";
+    btn.classList.add("playing");
+    audio.play().catch(reset);
   }
   _updateTime() {
     if (!this._lastSeenIso || !this.shadowRoot) return;
@@ -410,7 +452,7 @@ class HaikuboxBirdCard extends HTMLElement {
     // `position` (1-based) selects which ranked entry to show.
     const top = Array.isArray(attrs.detections) ? attrs.detections[this._index()] : null;
     const bird = top
-      ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen }
+      ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen, audio_url: top.audio_url }
       : null;
     const empty = !bird || !bird.species;
     const actionable = (this._config.tap_action?.action ?? "more-info") !== "none";
@@ -450,6 +492,7 @@ class HaikuboxBirdCard extends HTMLElement {
          */
         .img-wrap {
           flex: 0 0 auto;
+          position: relative;  /* anchors the play-call overlay */
           /*
            * Portrait: photo height = card width (square), but not more than
            * card height minus a text area. The reserve grows with card
@@ -478,6 +521,33 @@ class HaikuboxBirdCard extends HTMLElement {
           background: var(--secondary-background-color);
           font-size: 3em;
         }
+        /* "Play the call" — a round button over the photo (bottom-left). Plays
+         * the detection's recording (cached locally) in the browser. */
+        .play-call {
+          position: absolute;
+          left: 6px;
+          bottom: 6px;
+          z-index: 2;
+          width: 34px;
+          height: 34px;
+          padding: 0;
+          border: none;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.95rem;
+          line-height: 1;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.5);
+          cursor: pointer;
+        }
+        .play-call:hover { background: rgba(0, 0, 0, 0.7); }
+        .play-call:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+        .play-call.playing { background: var(--accent-color, #ff9800); }
         /* Body fills remaining space; justify-content centres text vertically */
         .body {
           flex: 1 1 auto;
@@ -587,6 +657,9 @@ class HaikuboxBirdCard extends HTMLElement {
               ${bird.image_url
                 ? `<img src="${_esc(bird.image_url)}" alt="${_esc(bird.species)}">`
                 : `<div class="img-placeholder">🐦</div>`}
+              ${this._config.show_audio !== false && bird.audio_url
+                ? `<button class="play-call" type="button" data-audio="${_esc(bird.audio_url)}" aria-label="Play recording of ${_esc(bird.species)}" title="Play call">▶</button>`
+                : ""}
             </div>
             <div class="body">
               <div class="text-group">
@@ -609,6 +682,18 @@ class HaikuboxBirdCard extends HTMLElement {
         placeholder.className = "img-placeholder";
         placeholder.textContent = "🐦";
         img.replaceWith(placeholder);
+      });
+    }
+
+    // Play-call button: play in-browser without triggering the card tap action.
+    const playBtn = this.shadowRoot.querySelector(".play-call");
+    if (playBtn) {
+      playBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._togglePlay(playBtn);
+      });
+      playBtn.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
       });
     }
 

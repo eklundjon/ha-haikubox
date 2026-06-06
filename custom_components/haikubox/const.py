@@ -106,3 +106,19 @@ BACKFILL_REQUEST_DELAY = 0.25
 # via the options flow.
 CONF_ABSENCE_DAYS = "absence_days"
 DEFAULT_ABSENCE_DAYS = 30
+
+# Detection-audio cache. /detections carries a per-detection `wav` (a short FLAC)
+# as an AWS presigned URL that expires in ~1 hour, so to make "play the call"
+# robust (survive expiry + restarts, and keep the signed URL out of HA state) we
+# download clips to config/www/haikubox/audio/ and serve stable /local/ paths.
+#
+# Two tiers, to stay gentle on Haikubox's API by default:
+#   * HEADLINE — always on: only the headline records (last + notable detection),
+#     a couple of clips per poll, kept HEADLINE_AUDIO_DAYS.
+#   * FULL — opt-in via CONF_AUDIO_CACHE_DAYS (days; default 0 = off): also cache
+#     the whole recent feed for that many days (power users; far heavier download).
+# MAX_AUDIO_CLIPS is a hard safety ceiling (~74 KB/clip, so 50k ≈ 3.7 GB).
+HEADLINE_AUDIO_DAYS = 30
+CONF_AUDIO_CACHE_DAYS = "audio_cache_days"
+DEFAULT_AUDIO_CACHE_DAYS = 0
+MAX_AUDIO_CLIPS = 50000

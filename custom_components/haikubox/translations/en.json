@@ -38,12 +38,14 @@
         "data": {
           "notable_rarity_weight": "Notability: % weight toward rarity",
           "absence_days": "Unusual visitor: days unheard",
+          "audio_cache_days": "Audio: days to keep recordings",
           "watched_species": "Watch species (detected here)",
           "watched_species_extra": "Also watch (one name per line)"
         },
         "data_description": {
           "notable_rarity_weight": "100% = pure rarity; 0% = pure recency. Default 70% leans toward rarity with a small recency nudge.",
           "absence_days": "How long a known species must have gone unheard before it counts as an unusual visitor (the unusual_visitor automation trigger). Default 30 days.",
+          "audio_cache_days": "“Play the call” downloads recent detection recordings to config/www and serves them locally (the source URLs expire in ~1 hour). This sets how many days to keep them. 0 disables audio. Default 7. Roughly 74 KB/clip; the cache is hard-capped regardless.",
           "watched_species": "Pick from species your box has already detected. A “watched species detected” device trigger fires when one is heard.",
           "watched_species_extra": "Add species your box hasn’t recorded yet (e.g. a hoped-for visitor) — one common name per line, exactly as the Haikubox app spells it."
         }

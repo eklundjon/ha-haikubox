@@ -142,6 +142,7 @@ show_ebird: false              # eBird links in compact view (default: false)
 show_allaboutbirds: false      # All About Birds links in compact view (default: false)
 show_macaulay: false           # Macaulay Library links in compact view (default: false)
 show_description: true         # Wikipedia description in the detail view (default: true)
+show_audio: true               # "Play call" button in the detail view (default: true)
 grid_options:
   columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
@@ -179,6 +180,12 @@ show_macaulay: true         # Macaulay Library button on the compact row too
 ### Species description
 
 The detail view shows a short **Wikipedia** description, fetched on demand the first time you open a species' row (and cached for the session). Tap it — or the "Read more on Wikipedia ›" cue beneath it — to open the full article in a new tab. Turn it off with `show_description: false` (also a toggle in the visual editor); doing so also removes the only Wikipedia link from the card.
+
+### Play the call (audio)
+
+When a row has a cached recording, the detail view shows a **▶ Play call** button (and the bird card shows a round play button over the photo) that plays the detection's audio in the browser. Toggle it with `show_audio` (default on; both cards).
+
+Haikubox's recording URLs expire after ~1 hour, so the integration downloads clips to `config/www/haikubox/audio/` and serves stable local copies. By default it only keeps the **headline** detections (last + notable) — for 30 days — which is light on the Haikubox API. To cache the full recent feed for longer, raise **Audio: days to keep recordings** in the integration's options (**Settings → Devices & Services → Haikubox → Configure**); `0` disables audio entirely. So a play button appears only where a clip is cached (recent/headline rows), not on every historical row.
 
 Point it at any list-bearing sensor:
 
