@@ -34,24 +34,42 @@
     "step": {
       "init": {
         "title": "Haikubox options",
-        "description": "Tune the “notable species” ranking, the unusual-visitor alert, and the species you want to be alerted about.",
+        "description": "Tune the “notable species” ranking and the unusual-visitor alert. Watched species and audio are in the sections below.",
         "data": {
           "notable_rarity_weight": "Notability: % weight toward rarity",
-          "absence_days": "Unusual visitor: days unheard",
-          "audio_enabled": "Audio: enable “play the call”",
-          "audio_cache_days": "Audio: extra days to cache the full feed",
-          "audio_norm_target": "Audio: normalization target (peak)",
-          "watched_species": "Watch species (detected here)",
-          "watched_species_extra": "Also watch (one name per line)"
+          "absence_days": "Unusual visitor: days unheard"
         },
         "data_description": {
           "notable_rarity_weight": "100% = pure rarity; 0% = pure recency. Default 70% leans toward rarity with a small recency nudge.",
-          "absence_days": "How long a known species must have gone unheard before it counts as an unusual visitor (the unusual_visitor automation trigger). Default 30 days.",
-          "audio_enabled": "Master switch for “play the call”. Off by default. When on, recent detection recordings are downloaded to config/www, normalized so faint calls are audible, and served locally so the cards show a play button (the source URLs expire in ~1 hour). Off means no downloads, no processing and no buttons. Needs ffmpeg (bundled with Home Assistant).",
-          "audio_cache_days": "With audio on, the headline detections (last + notable) are always cached for 30 days. This caches the full recent feed for this many extra days too (heavier download). 0 = headline clips only. Roughly 74 KB/clip; the cache is hard-capped regardless.",
-          "audio_norm_target": "Detection clips are often very quiet, so each is volume-normalized to this peak level (dBFS) when cached. Default -3 dB. Lower it if playback is too hot for your speakers; 0 dB is loudest but leaves no headroom and can clip on some outputs (-1 to -3 is safer).",
-          "watched_species": "Pick from species your box has already detected. A “watched species detected” device trigger fires when one is heard.",
-          "watched_species_extra": "Add species your box hasn’t recorded yet (e.g. a hoped-for visitor) — one common name per line, exactly as the Haikubox app spells it."
+          "absence_days": "How long a known species must have gone unheard before it counts as an unusual visitor (the unusual_visitor automation trigger). Default 30 days."
+        },
+        "sections": {
+          "watched": {
+            "name": "Watched Species",
+            "description": "Get a device trigger when specific species are heard.",
+            "data": {
+              "watched_species": "Watch species (detected here)",
+              "watched_species_extra": "Also watch (one name per line)"
+            },
+            "data_description": {
+              "watched_species": "Pick from species your box has already detected. A “watched species detected” device trigger fires when one is heard.",
+              "watched_species_extra": "Add species your box hasn’t recorded yet (e.g. a hoped-for visitor) — one common name per line, exactly as the Haikubox app spells it."
+            }
+          },
+          "audio": {
+            "name": "Audio Options",
+            "description": "“Play the call” — cache and play detection recordings on the cards.",
+            "data": {
+              "audio_enabled": "Enable “play the call”",
+              "audio_cache_days": "Extra days to cache the full feed",
+              "audio_norm_target": "Normalization target (peak)"
+            },
+            "data_description": {
+              "audio_enabled": "Master switch for “play the call”. Off by default. When on, recent detection recordings are downloaded to config/www, normalized so faint calls are audible, and served locally so the cards show a play button (the source URLs expire in ~1 hour). Off means no downloads, no processing and no buttons. Needs ffmpeg (bundled with Home Assistant).",
+              "audio_cache_days": "The headline detections (last + notable) are always cached for 30 days. This caches the full recent feed for this many extra days too (heavier download). 0 = headline clips only. Roughly 74 KB/clip; the cache is hard-capped regardless.",
+              "audio_norm_target": "Detection clips are often very quiet, so each is volume-normalized to this peak level (dBFS) when cached. Default -3 dB. Lower it if playback is too hot for your speakers; 0 dB is loudest but leaves no headroom and can clip on some outputs (-1 to -3 is safer)."
+            }
+          }
         }
       }
     }
