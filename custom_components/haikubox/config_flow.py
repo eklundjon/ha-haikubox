@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -29,6 +30,8 @@ from .const import (
     API_BASE,
     CONF_ABSENCE_DAYS,
     CONF_AUDIO_CACHE_DAYS,
+    CONF_AUDIO_ENABLED,
+    CONF_AUDIO_NORM_TARGET,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
@@ -36,6 +39,8 @@ from .const import (
     CONF_WATCHED_SPECIES,
     DEFAULT_ABSENCE_DAYS,
     DEFAULT_AUDIO_CACHE_DAYS,
+    DEFAULT_AUDIO_ENABLED,
+    DEFAULT_AUDIO_NORM_TARGET,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DOMAIN,
 )
@@ -155,7 +160,9 @@ class HaikuboxOptionsFlow(OptionsFlow):
             CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
         )
         current_absence = opts.get(CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS)
+        current_audio_on = opts.get(CONF_AUDIO_ENABLED, DEFAULT_AUDIO_ENABLED)
         current_audio_days = opts.get(CONF_AUDIO_CACHE_DAYS, DEFAULT_AUDIO_CACHE_DAYS)
+        current_audio_norm = opts.get(CONF_AUDIO_NORM_TARGET, DEFAULT_AUDIO_NORM_TARGET)
 
         # Watch-list picker: union of species the box has detected with any
         # already-saved selections (so a saved name that's since dropped off the
@@ -197,6 +204,10 @@ class HaikuboxOptionsFlow(OptionsFlow):
                         )
                     ),
                     vol.Required(
+                        CONF_AUDIO_ENABLED,
+                        default=current_audio_on,
+                    ): BooleanSelector(),
+                    vol.Required(
                         CONF_AUDIO_CACHE_DAYS,
                         default=current_audio_days,
                     ): NumberSelector(
@@ -206,6 +217,18 @@ class HaikuboxOptionsFlow(OptionsFlow):
                             step=1,
                             mode=NumberSelectorMode.BOX,
                             unit_of_measurement="days",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_AUDIO_NORM_TARGET,
+                        default=current_audio_norm,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=-24,
+                            max=0,
+                            step=1,
+                            mode=NumberSelectorMode.SLIDER,
+                            unit_of_measurement="dB",
                         )
                     ),
                     vol.Optional(

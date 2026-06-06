@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import os
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,6 +12,12 @@ import aiofiles
 import aiohttp
 
 from homeassistant.core import HomeAssistant
+
+from .const import (
+    AUDIO_NORM_MAX_GAIN_DB,
+    AUDIO_SILENCE_FLOOR_DB,
+    DEFAULT_AUDIO_NORM_TARGET,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,11 +36,23 @@ class AudioCache:
     an in-memory index of cached ids avoids re-downloading.
     """
 
-    def __init__(self, hass: HomeAssistant, session: aiohttp.ClientSession) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        session: aiohttp.ClientSession,
+        ffmpeg_bin: str | None = None,
+        norm_target_db: float = DEFAULT_AUDIO_NORM_TARGET,
+    ) -> None:
         self._hass = hass
         self._session = session
+        self._ffmpeg = ffmpeg_bin
+        self._norm_target = norm_target_db
         self._dir: Path = Path(hass.config.path("www", "haikubox", "audio"))
         self._cached: set[str] = set()
+        # Clips found to have no real signal (peak < AUDIO_SILENCE_FLOOR_DB) —
+        # remembered so we don't re-download them every poll. Not persisted, so a
+        # silent clip is re-checked once after a restart.
+        self._silent: set[str] = set()
 
     async def async_init(self) -> None:
         """Create the cache dir and index existing files (one executor hop)."""
@@ -69,19 +89,96 @@ class AudioCache:
             return None
         if cid in self._cached:
             return f"/local/haikubox/audio/{cid}.flac"
+        if cid in self._silent:
+            return None  # known to have no real signal; don't re-download
         try:
             async with self._session.get(wav_url) as resp:
                 if resp.status != 200:
                     _LOGGER.debug("Audio clip fetch HTTP %s", resp.status)
                     return None
                 data = await resp.read()
-            async with aiofiles.open(self._dir / f"{cid}.flac", "wb") as f:
+            path = self._dir / f"{cid}.flac"
+            async with aiofiles.open(path, "wb") as f:
                 await f.write(data)
         except (aiohttp.ClientError, OSError) as err:
             _LOGGER.debug("Could not cache audio clip: %s", err)
             return None
+        if self._ffmpeg:
+            peak = await self._measure_peak(path)
+            if peak is not None and peak < AUDIO_SILENCE_FLOOR_DB:
+                # No real signal — treat the clip as missing so the card shows no
+                # play button (better than a "Playing…" state with no output).
+                self._silent.add(cid)
+                await self._hass.async_add_executor_job(self._unlink, path)
+                return None
+            await self._normalize(path, peak)
         self._cached.add(cid)
         return f"/local/haikubox/audio/{cid}.flac"
+
+    async def _normalize(self, path: Path, peak: float | None) -> None:
+        """Peak-normalize a freshly cached clip in place (best-effort).
+
+        Detection clips are often very quiet, so faint calls are inaudible at the
+        raw level. We apply a *per-file* gain to bring the clip's peak to the
+        configured target (self._norm_target, so loud clips aren't blown out),
+        capping the boost at AUDIO_NORM_MAX_GAIN_DB so a near-silent clip isn't
+        amplified into full-scale noise. `peak` is the clip's measured max_volume
+        (dBFS) from async_fetch. Any failure leaves the raw clip untouched;
+        re-running on an already-normalized clip computes ~0 gain and skips
+        (idempotent).
+        """
+        if peak is None:
+            return
+        try:
+            gain = min(self._norm_target - peak, AUDIO_NORM_MAX_GAIN_DB)
+            if abs(gain) < 0.5:
+                return  # already at target
+            tmp = path.with_name(f"{path.stem}.norm.flac")
+            code = await self._run_ffmpeg(
+                "-y", "-i", str(path), "-af", f"volume={gain:.1f}dB",
+                "-c:a", "flac", str(tmp),
+            )
+            await self._hass.async_add_executor_job(self._swap_norm, tmp, path, code == 0)
+        except (OSError, ValueError) as err:
+            _LOGGER.debug("Audio normalize failed: %s", err)
+
+    async def _measure_peak(self, path: Path) -> float | None:
+        """Return the clip's max_volume in dBFS via ffmpeg volumedetect."""
+        proc = await asyncio.create_subprocess_exec(
+            self._ffmpeg, "-hide_banner", "-nostdin",
+            "-i", str(path), "-af", "volumedetect", "-f", "null", "-",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        for line in stderr.decode("utf-8", "replace").splitlines():
+            if "max_volume:" in line:
+                try:
+                    return float(line.split("max_volume:")[1].split("dB")[0])
+                except (IndexError, ValueError):
+                    return None
+        return None
+
+    async def _run_ffmpeg(self, *args: str) -> int | None:
+        proc = await asyncio.create_subprocess_exec(
+            self._ffmpeg, "-hide_banner", "-nostdin", *args,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        return proc.returncode
+
+    @staticmethod
+    def _swap_norm(tmp: Path, path: Path, ok: bool) -> None:
+        """Replace the raw clip with the normalized temp on success, else drop it."""
+        try:
+            if ok and tmp.exists() and tmp.stat().st_size > 0:
+                os.replace(tmp, path)
+                return
+        except OSError:
+            pass
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
     async def async_prune(self, max_age_days: int, max_clips: int) -> None:
         """Delete clips older than max_age_days, then trim to max_clips (oldest first)."""

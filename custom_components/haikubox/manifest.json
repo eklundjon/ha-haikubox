@@ -2,6 +2,7 @@
   "domain": "haikubox",
   "name": "Haikubox",
   "after_dependencies": [
+    "ffmpeg",
     "recorder"
   ],
   "codeowners": [

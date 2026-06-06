@@ -25,6 +25,8 @@ from .const import (
     BACKFILL_STOP_AFTER_404,
     CONF_ABSENCE_DAYS,
     CONF_AUDIO_CACHE_DAYS,
+    CONF_AUDIO_ENABLED,
+    CONF_AUDIO_NORM_TARGET,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
@@ -33,6 +35,8 @@ from .const import (
     DAILY_WINDOW_HOURS,
     DEFAULT_ABSENCE_DAYS,
     DEFAULT_AUDIO_CACHE_DAYS,
+    DEFAULT_AUDIO_ENABLED,
+    DEFAULT_AUDIO_NORM_TARGET,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -91,6 +95,23 @@ async def _async_load_ebird_species(hass: HomeAssistant) -> None:
     global _EBIRD_SPECIES
     if _EBIRD_SPECIES is None:
         _EBIRD_SPECIES = await hass.async_add_executor_job(_read_ebird_species)
+
+
+def _ffmpeg_binary(hass: HomeAssistant) -> str | None:
+    """Resolve the ffmpeg binary for audio normalization (None if unavailable).
+
+    Prefer HA's ffmpeg component (bundled in standard installs); fall back to a
+    binary on PATH. When neither exists, audio normalization is silently skipped
+    and clips are served at their raw (quiet) level.
+    """
+    try:
+        from homeassistant.components.ffmpeg import get_ffmpeg_manager
+
+        return get_ffmpeg_manager(hass).binary
+    except (KeyError, HomeAssistantError, ImportError):
+        from shutil import which
+
+        return which("ffmpeg")
 
 
 class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -160,8 +181,20 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Species photo cache (downloads once, serves from /local/)
         self._images = ImageCache(hass, self._session)
-        # Detection-audio cache (downloads recent clips, serves from /local/)
-        self._audio = AudioCache(hass, self._session)
+        # Detection-audio cache (downloads recent clips, serves from /local/);
+        # ffmpeg (bundled with HA) is used to peak-normalize the quiet clips.
+        # The whole pipeline is opt-in (read once here; options changes reload
+        # the entry, so this is re-evaluated): when off, nothing is indexed,
+        # fetched, normalized or pruned, and no audio_url is exposed.
+        self._audio = AudioCache(
+            hass,
+            self._session,
+            _ffmpeg_binary(hass),
+            entry.options.get(CONF_AUDIO_NORM_TARGET, DEFAULT_AUDIO_NORM_TARGET),
+        )
+        self._audio_enabled = entry.options.get(
+            CONF_AUDIO_ENABLED, DEFAULT_AUDIO_ENABLED
+        )
         # Per-poll map: species code → its most-recent clip URL (for audio resolve)
         self._latest_wav_by_species: dict[str, str] = {}
 
@@ -471,7 +504,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # recent feed for that many days (power users; heavier download). The
         # retention floor is the headline window. _with_links resolves the
         # stable /local audio_url; the signed source URL is never stored.
-        if self._latest_wav_by_species:
+        if self._audio_enabled and self._latest_wav_by_species:
             full_days = self.config_entry.options.get(
                 CONF_AUDIO_CACHE_DAYS, DEFAULT_AUDIO_CACHE_DAYS
             )
@@ -663,7 +696,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             )
             wav = r.pop("wav", None) or self._latest_wav_by_species.get(r.get("sp_code", ""))
-            r["audio_url"] = self._audio.url_for(wav) if self._audio else None
+            r["audio_url"] = (
+                self._audio.url_for(wav)
+                if (self._audio_enabled and self._audio)
+                else None
+            )
         return records
 
     def _fire_event(
@@ -752,7 +789,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ).async_remove()
 
         await self._images.async_init()
-        await self._audio.async_init()
+        if self._audio_enabled:
+            await self._audio.async_init()
 
         # Preload the bundled eBird-code fallback map off the event loop, so
         # the synchronous _sp_code_for() lookups during a poll never touch disk.
