@@ -11,6 +11,7 @@ import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
@@ -139,6 +140,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_seen: dict[str, str] = {}             # species → last_seen ISO
         self._baseline_items: list[dict[str, Any]] = []    # trailing-window baseline [{species, count, rank}]
         self._daily_counts: dict[str, dict[str, int]] = {}  # date_str → {species: count}, full lifetime
+        self._stats_imported_date: date | None = None    # long-term statistics backfill, once per box-day
         self._backfill_complete: bool = False            # reached the pre-install 404 floor
         self._backfill_cursor: str | None = None         # oldest date the deep backfill has probed
         self._backfill_misses: int = 0                   # consecutive 404s at the leading (oldest) edge
@@ -195,6 +197,20 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Rarity baseline not yet available — /daily-count backfill has "
                 "no data yet and there is no cached history"
             )
+
+        # Backfill HA long-term statistics straight from the per-day counts store
+        # (no API call). Once per box-local calendar day; idempotent, so it also
+        # fills days as the deep backfill keeps accumulating them. No recorder →
+        # skip cleanly for the day.
+        if self._stats_imported_date != today:
+            if "recorder" not in (self.hass.config.components if self.hass else ()):
+                self._stats_imported_date = today
+            elif self._daily_counts:
+                try:
+                    await self._import_history_statistics()
+                    self._stats_imported_date = today
+                except (aiohttp.ClientError, HomeAssistantError) as err:
+                    _LOGGER.warning("Could not import history statistics: %s", err)
 
         try:
             daily_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
@@ -1046,6 +1062,82 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def lifetime_species_count(self) -> int:
         return len(self._seen_species)
+
+    async def _import_history_statistics(self) -> None:
+        """Backfill HA long-term statistics from the per-day counts store (no
+        API call): detection totals (cumulative `sum` → the Statistics card
+        shows detections per day/week/month) and species richness (daily
+        `mean`), over the box's full recorded history. Each day is anchored at
+        the box's local midnight (its /daily-count days are box-local). Re-runs
+        daily and is idempotent on (statistic_id, day), so it also picks up days
+        as the deep backfill keeps extending the store."""
+        # Lazy imports: only pull in recorder internals when actually backfilling.
+        from homeassistant.components.recorder.models import (  # noqa: PLC0415
+            StatisticData,
+            StatisticMeanType,
+            StatisticMetaData,
+        )
+        from homeassistant.components.recorder.statistics import (  # noqa: PLC0415
+            async_add_external_statistics,
+        )
+
+        box_tz = await self._async_box_tz()  # cached; None → fall back to HA tz
+        # statistic_id must be lowercase (like an entity_id); some serials are
+        # uppercase hex (e.g. 348518979FA0) → valid_statistic_id rejects them.
+        serial = self.serial.lower()
+        det_stats: list[StatisticData] = []
+        sp_stats: list[StatisticData] = []
+        cumulative = 0.0
+        for day_str in sorted(self._daily_counts):
+            try:
+                day = date.fromisoformat(day_str)
+            except (TypeError, ValueError):
+                continue
+            counts = self._daily_counts[day_str] or {}
+            total = sum(counts.values())
+            species = float(len(counts))
+            start = (
+                datetime(day.year, day.month, day.day, tzinfo=box_tz)
+                if box_tz
+                else dt_util.start_of_local_day(day)
+            )
+            cumulative += total
+            det_stats.append(
+                StatisticData(start=start, state=float(total), sum=cumulative)
+            )
+            sp_stats.append(
+                StatisticData(start=start, mean=species, min=species, max=species)
+            )
+        if not det_stats:
+            return
+
+        async_add_external_statistics(
+            self.hass,
+            StatisticMetaData(
+                has_sum=True,
+                has_mean=False,
+                mean_type=StatisticMeanType.NONE,
+                name=f"{self.device_name} daily detections",
+                source=DOMAIN,
+                statistic_id=f"{DOMAIN}:box_{serial}_daily_detections",
+                unit_of_measurement="detections",
+                unit_class=None,
+            ),
+            det_stats,
+        )
+        async_add_external_statistics(
+            self.hass,
+            StatisticMetaData(
+                has_sum=False,
+                mean_type=StatisticMeanType.ARITHMETIC,
+                name=f"{self.device_name} daily species",
+                source=DOMAIN,
+                statistic_id=f"{DOMAIN}:box_{serial}_daily_species",
+                unit_of_measurement="species",
+                unit_class=None,
+            ),
+            sp_stats,
+        )
 
     # ------------------------------------------------------------------
     # HTTP helpers

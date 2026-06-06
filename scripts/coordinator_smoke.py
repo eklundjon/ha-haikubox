@@ -82,6 +82,7 @@ async def main() -> None:
     c._backfill_complete = True
     c._backfill_cursor = (today - timedelta(days=9)).isoformat()
     c._backfill_misses = 14
+    c._stats_imported_date = None
 
     async def fake_detections(hours): return _DETECTIONS
     async def fake_daily_count(date_str):

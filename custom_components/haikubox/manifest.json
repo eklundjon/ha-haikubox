@@ -1,6 +1,9 @@
 {
   "domain": "haikubox",
   "name": "Haikubox",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@eklundjon"
   ],
