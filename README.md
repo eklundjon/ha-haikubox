@@ -14,6 +14,7 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 - **New species** — flags species appearing for the first time ever on your box; lifetime log survives restarts
 - **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
 - **Bird details sensors** — top species (last 12 months), top species (last 24 h), rarest species (7 d)
+- **Historical trends (no Grafana)** — backfills Home Assistant's native long-term **Statistics** with your box's *true* daily history (detections per day, species per day) — your whole recorded history, often years — so HA's built-in Statistics graph card shows real long-term trends out of the box
 - **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views, optional per-row links to eBird, All About Birds, and Macaulay Library, and a Wikipedia description (tap to read the full article) in the expanded detail
 - **Automations** — device triggers for new-species, unusual-visitor, and watched-species detections, plus blueprints for photo push notifications
 - **Watched species** — choose species to be alerted about (a pick-list of ones your box has detected, plus free text for ones it hasn't); fires a device trigger when one is heard, and lists them in a "Birds of interest" sensor
@@ -67,6 +68,20 @@ entity: sensor.bird_shazam_last_detection
 ```
 
 Full card reference, including the ranked list card and `tap_action` configuration: [docs/cards.md](docs/cards.md).
+
+### Historical trends
+
+The integration backfills HA's long-term Statistics with your box's true daily history — view it with the built-in **Statistics graph** card (no Grafana). The statistic IDs use your box serial, lowercased: `haikubox:box_<serial>_daily_detections` (detections/day; totals per day/week/month) and `haikubox:box_<serial>_daily_species` (species/day):
+
+```yaml
+type: statistics-graph
+title: Detections per day
+chart_type: bar
+period: day
+stat_types: [change]
+entities:
+  - haikubox:box_<serial>_daily_detections
+```
 
 ## Documentation
 
