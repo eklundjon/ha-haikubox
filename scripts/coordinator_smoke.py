@@ -60,6 +60,9 @@ async def main() -> None:
     c.config_entry = _FakeEntry()
     c._box_tz = timezone.utc
     c._images = _FakeImages()
+    c._audio = None  # canned data has no wav → audio resolve short-circuits
+    c._audio_enabled = False
+    c._latest_wav_by_species = {}
     c._last_detected = None
     c._last_notable = None
     c._prev_recent_species = None

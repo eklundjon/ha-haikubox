@@ -39,6 +39,7 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       if (this._aabField)   this._aabField.value   = !!config.show_allaboutbirds;
       if (this._mlField)    this._mlField.value    = !!config.show_macaulay;
       if (this._descField)  this._descField.value  = config.show_description !== false;
+      if (this._audioField) this._audioField.value = config.show_audio !== false;
     }
   }
 
@@ -56,6 +57,7 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       if (this._aabField)   this._aabField.hass   = hass;
       if (this._mlField)    this._mlField.hass    = hass;
       if (this._descField)  this._descField.hass  = hass;
+      if (this._audioField) this._audioField.hass = hass;
     }
   }
 
@@ -189,7 +191,17 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       descField.addEventListener("value-changed", (e) => this._fire({ show_description: e.detail.value }));
       this._descField = descField;
 
-      form.append(ebirdField, aabField, mlField, descField);
+      // "Play the call" button in the detail view (default on). Plays the
+      // detection's recording (cached locally) in the browser.
+      const audioField = document.createElement("ha-selector");
+      audioField.label = "Show play-call button in detail view";
+      audioField.selector = { boolean: {} };
+      if (this._hass) audioField.hass = this._hass;
+      audioField.value = this._config?.show_audio !== false;
+      audioField.addEventListener("value-changed", (e) => this._fire({ show_audio: e.detail.value }));
+      this._audioField = audioField;
+
+      form.append(ebirdField, aabField, mlField, descField, audioField);
     }
 
     this.appendChild(form);
@@ -257,6 +269,42 @@ class HaikuboxBirdListCard extends HTMLElement {
       clearInterval(this._timeTicker);
       this._timeTicker = null;
     }
+    if (this._audio) {
+      this._audio.pause();
+      this._audio = null;
+    }
+  }
+
+  // Play/pause a detection's recording in the browser (one Audio instance for
+  // the card). Failures (unavailable / unsupported) fall back to a brief label.
+  _togglePlay(btn) {
+    const url = btn.dataset.audio;
+    if (!url) return;
+    if (this._playingBtn === btn && this._audio && !this._audio.paused) {
+      this._audio.pause();
+      return;
+    }
+    if (this._audio) this._audio.pause();
+    const audio = new Audio(url);
+    this._audio = audio;
+    this._playingBtn = btn;
+    audio.addEventListener("ended", () => this._setPlayIcon(btn, false));
+    audio.addEventListener("pause", () => this._setPlayIcon(btn, false));
+    audio.addEventListener("error", () => {
+      this._setPlayIcon(btn, false);
+      const label = btn.querySelector(".play-label");
+      if (label) label.textContent = "unavailable";
+    });
+    this._setPlayIcon(btn, true);
+    audio.play().catch(() => this._setPlayIcon(btn, false));
+  }
+
+  _setPlayIcon(btn, playing) {
+    btn.classList.toggle("playing", playing);
+    const icon = btn.querySelector(".play-icon");
+    const label = btn.querySelector(".play-label");
+    if (icon) icon.textContent = playing ? "⏸" : "▶";
+    if (label) label.textContent = playing ? "Playing…" : "Play call";
   }
   _updateTimes() {
     if (!this.shadowRoot) return;
@@ -652,6 +700,30 @@ class HaikuboxBirdListCard extends HTMLElement {
           font-weight: 600;
         }
 
+        /* "Play the call" button — plays the detection's recording in-browser. */
+        .play-call {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          margin-top: 10px;
+          padding: 4px 12px 4px 10px;
+          border: none;
+          border-radius: 16px;
+          background: var(--primary-color);
+          color: var(--text-primary-color, #fff);
+          font: inherit;
+          font-size: 0.78em;
+          font-weight: 500;
+          cursor: pointer;
+        }
+        .play-call:hover { opacity: 0.9; }
+        .play-call:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+        .play-call .play-icon { font-size: 1.05em; line-height: 1; }
+        .play-call.playing { background: var(--accent-color, #ff9800); }
+
         .empty {
           padding: 10px 16px;
           font-size: 0.85em;
@@ -695,6 +767,9 @@ class HaikuboxBirdListCard extends HTMLElement {
                         ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
                         ${t ? `<div class="metric">last heard <strong data-last-seen="${_esc(item.last_seen)}">${_esc(t)}</strong></div>` : ""}
                       </div>
+                      ${this._config.show_audio !== false && item.audio_url
+                        ? `<button class="play-call" type="button" data-audio="${_esc(item.audio_url)}" aria-label="Play recording of ${_esc(item.species)}"><span class="play-icon">▶</span><span class="play-label">Play call</span></button>`
+                        : ""}
                       ${this._linksBlock(item, { ebird: true, aab: true, ml: true }, "detail-links")}
                     </div>
                   </div>
@@ -708,20 +783,29 @@ class HaikuboxBirdListCard extends HTMLElement {
 
     const list = this.shadowRoot.querySelector(".list");
     list.addEventListener("click", (e) => {
-      // A link button lives inside the item; let it navigate without
-      // also toggling the detail view.
-      if (e.target.closest("a")) return;
+      // A link or the play-call button lives inside the item; let it act
+      // without also toggling the detail view.
+      if (e.target.closest("a, .play-call")) return;
       const item = e.target.closest(".item");
       if (item) this._toggleItem(item);
     });
     list.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
-      // Enter on a focused link navigates; don't also toggle the item.
-      if (e.target.closest("a")) return;
+      // Enter/Space on a focused link or play button acts on it, not the row.
+      if (e.target.closest("a, .play-call")) return;
       const item = e.target.closest(".item");
       if (!item) return;
       e.preventDefault();  // Space would otherwise scroll the list
       this._toggleItem(item);
+    });
+
+    // "Play the call": play the detection's recording in-browser. stopPropagation
+    // keeps the row from toggling; one Audio instance, play/pause toggling.
+    this.shadowRoot.querySelectorAll(".play-call").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._togglePlay(btn);
+      });
     });
 
     // Replace broken images (S3 404, network drop) with the placeholder

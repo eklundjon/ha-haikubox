@@ -106,3 +106,47 @@ BACKFILL_REQUEST_DELAY = 0.25
 # via the options flow.
 CONF_ABSENCE_DAYS = "absence_days"
 DEFAULT_ABSENCE_DAYS = 30
+
+# Detection-audio cache. /detections carries a per-detection `wav` (a short FLAC)
+# as an AWS presigned URL that expires in ~1 hour, so to make "play the call"
+# robust (survive expiry + restarts, and keep the signed URL out of HA state) we
+# download clips to config/www/haikubox/audio/ and serve stable /local/ paths.
+#
+# Two tiers, to stay gentle on Haikubox's API by default:
+#   * HEADLINE — always on: only the headline records (last + notable detection),
+#     a couple of clips per poll, kept HEADLINE_AUDIO_DAYS.
+#   * FULL — opt-in via CONF_AUDIO_CACHE_DAYS (days; default 0 = off): also cache
+#     the whole recent feed for that many days (power users; far heavier download).
+# MAX_AUDIO_CLIPS is a hard safety ceiling (~74 KB/clip, so 50k ≈ 3.7 GB).
+# Master switch for the whole audio feature. Downloading, normalizing (ffmpeg),
+# caching and pruning clips is non-trivial background work + disk, so it's
+# opt-in: off by default, no audio work happens and no play buttons render until
+# the user enables it in the options flow.
+CONF_AUDIO_ENABLED = "audio_enabled"
+DEFAULT_AUDIO_ENABLED = False
+
+HEADLINE_AUDIO_DAYS = 30
+CONF_AUDIO_CACHE_DAYS = "audio_cache_days"
+DEFAULT_AUDIO_CACHE_DAYS = 0
+MAX_AUDIO_CLIPS = 50000
+
+# Detection clips are often very quiet (faint/distant calls peak around -35 dB,
+# some near -54 dB), so without normalization many are inaudible. Peak-normalize
+# each cached clip to the configured target (CONF_AUDIO_NORM_TARGET, default
+# DEFAULT_AUDIO_NORM_TARGET dBFS) — a *per-file* gain (loud clips aren't blown
+# out), with the boost capped at AUDIO_NORM_MAX_GAIN_DB so a near-silent clip
+# isn't amplified into full-scale noise. The target is user-tunable (-24..0 dB)
+# to suit different dashboard hardware/output setups. The source carries audible
+# base noise (the official Haikubox app surfaces it too), so this just makes the
+# call audible at a consistent level. Done with ffmpeg (bundled with HA);
+# silently skipped if ffmpeg is unavailable. Idempotent (re-normalizing an
+# already-normalized clip computes ~0 gain and is skipped).
+CONF_AUDIO_NORM_TARGET = "audio_norm_target"
+DEFAULT_AUDIO_NORM_TARGET = -3
+AUDIO_NORM_MAX_GAIN_DB = 50.0
+
+# A clip whose raw peak is below this has no real signal (e.g. a silent
+# soundscape ≈ -68 dB; the faintest *real* call we see is ≈ -54 dB). Rather than
+# show a play button that produces inaudible output, we treat such a clip as
+# missing: drop it and expose no audio_url (so no button renders).
+AUDIO_SILENCE_FLOOR_DB = -60.0

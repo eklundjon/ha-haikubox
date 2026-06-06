@@ -12,8 +12,10 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -28,12 +30,18 @@ from homeassistant.helpers.selector import (
 from .const import (
     API_BASE,
     CONF_ABSENCE_DAYS,
+    CONF_AUDIO_CACHE_DAYS,
+    CONF_AUDIO_ENABLED,
+    CONF_AUDIO_NORM_TARGET,
     CONF_DEVICE_NAME,
     CONF_NOTABLE_RARITY_WEIGHT,
     CONF_SERIAL,
     CONF_WATCHED_EXTRA,
     CONF_WATCHED_SPECIES,
     DEFAULT_ABSENCE_DAYS,
+    DEFAULT_AUDIO_CACHE_DAYS,
+    DEFAULT_AUDIO_ENABLED,
+    DEFAULT_AUDIO_NORM_TARGET,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DOMAIN,
 )
@@ -134,25 +142,46 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
+# Collapsible UI sections in the options form. Presentation-only grouping keys;
+# their fields are flattened back into flat options on save.
+SECTION_WATCHED = "watched"
+SECTION_AUDIO = "audio"
+
+
 class HaikuboxOptionsFlow(OptionsFlow):
-    """Per-entry options: notable-species rarity/recency blend.
+    """Per-entry options, single step with two collapsible sections.
 
     No __init__ — HA's flow manager sets `self.config_entry` for us when
     the flow is created. Assigning it ourselves errors on HA 2024.12+
     (it became a read-only property), which is now our minimum.
+
+    Watched-species and audio settings live in collapsible sections (folded by
+    default, auto-expanded when in use). Section fields arrive nested under the
+    section key, so on save we flatten them back to flat options — the
+    coordinator keeps reading plain top-level keys.
     """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            data = {
+                k: v
+                for k, v in user_input.items()
+                if k not in (SECTION_WATCHED, SECTION_AUDIO)
+            }
+            data.update(user_input.get(SECTION_WATCHED, {}))
+            data.update(user_input.get(SECTION_AUDIO, {}))
+            return self.async_create_entry(title="", data=data)
 
         opts = self.config_entry.options
         current_weight = opts.get(
             CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
         )
         current_absence = opts.get(CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS)
+        current_audio_on = opts.get(CONF_AUDIO_ENABLED, DEFAULT_AUDIO_ENABLED)
+        current_audio_days = opts.get(CONF_AUDIO_CACHE_DAYS, DEFAULT_AUDIO_CACHE_DAYS)
+        current_audio_norm = opts.get(CONF_AUDIO_NORM_TARGET, DEFAULT_AUDIO_NORM_TARGET)
 
         # Watch-list picker: union of species the box has detected with any
         # already-saved selections (so a saved name that's since dropped off the
@@ -193,20 +222,62 @@ class HaikuboxOptionsFlow(OptionsFlow):
                             unit_of_measurement="days",
                         )
                     ),
-                    vol.Optional(
-                        CONF_WATCHED_SPECIES, default=saved
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=watch_options,
-                            multiple=True,
-                            custom_value=False,
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
+                    vol.Required(SECTION_WATCHED): section(
+                        vol.Schema(
+                            {
+                                vol.Optional(
+                                    CONF_WATCHED_SPECIES, default=saved
+                                ): SelectSelector(
+                                    SelectSelectorConfig(
+                                        options=watch_options,
+                                        multiple=True,
+                                        custom_value=False,
+                                        mode=SelectSelectorMode.DROPDOWN,
+                                    )
+                                ),
+                                vol.Optional(
+                                    CONF_WATCHED_EXTRA,
+                                    default=opts.get(CONF_WATCHED_EXTRA, ""),
+                                ): TextSelector(TextSelectorConfig(multiline=True)),
+                            }
+                        ),
+                        {"collapsed": not saved},
                     ),
-                    vol.Optional(
-                        CONF_WATCHED_EXTRA,
-                        default=opts.get(CONF_WATCHED_EXTRA, ""),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Required(SECTION_AUDIO): section(
+                        vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_AUDIO_ENABLED,
+                                    default=current_audio_on,
+                                ): BooleanSelector(),
+                                vol.Required(
+                                    CONF_AUDIO_CACHE_DAYS,
+                                    default=current_audio_days,
+                                ): NumberSelector(
+                                    NumberSelectorConfig(
+                                        min=0,
+                                        max=90,
+                                        step=1,
+                                        mode=NumberSelectorMode.BOX,
+                                        unit_of_measurement="days",
+                                    )
+                                ),
+                                vol.Required(
+                                    CONF_AUDIO_NORM_TARGET,
+                                    default=current_audio_norm,
+                                ): NumberSelector(
+                                    NumberSelectorConfig(
+                                        min=-24,
+                                        max=0,
+                                        step=1,
+                                        mode=NumberSelectorMode.SLIDER,
+                                        unit_of_measurement="dB",
+                                    )
+                                ),
+                            }
+                        ),
+                        {"collapsed": not current_audio_on},
+                    ),
                 }
             ),
         )

@@ -142,6 +142,7 @@ show_ebird: false              # eBird links in compact view (default: false)
 show_allaboutbirds: false      # All About Birds links in compact view (default: false)
 show_macaulay: false           # Macaulay Library links in compact view (default: false)
 show_description: true         # Wikipedia description in the detail view (default: true)
+show_audio: true               # "Play call" button in the detail view (default: true)
 grid_options:
   columns: 12
   rows: 4                      # controls card height; list scrolls if content exceeds it
@@ -179,6 +180,19 @@ show_macaulay: true         # Macaulay Library button on the compact row too
 ### Species description
 
 The detail view shows a short **Wikipedia** description, fetched on demand the first time you open a species' row (and cached for the session). Tap it — or the "Read more on Wikipedia ›" cue beneath it — to open the full article in a new tab. Turn it off with `show_description: false` (also a toggle in the visual editor); doing so also removes the only Wikipedia link from the card.
+
+### Play the call (audio)
+
+When a row has a cached recording, the detail view shows a **▶ Play call** button (and the bird card shows a round play button over the photo) that plays the detection's audio in the browser. Toggle the card element with `show_audio` (default on; both cards).
+
+**Audio is off by default** — it's downloading, normalizing and caching work, so you opt in: **Settings → Devices & Services → Haikubox → Configure → "Audio: enable 'play the call'"**. Once on, Haikubox's recording URLs (which expire after ~1 hour) are downloaded to `config/www/haikubox/audio/` and served as stable local copies. The **headline** detections (last + notable) are always kept for 30 days; to also cache the full recent feed, raise **"Audio: extra days to cache the full feed"** (0 = headline only). Requires `ffmpeg` (bundled with Home Assistant).
+
+Two things to know about which rows get a button:
+
+- Clips are **volume-normalized** (peak to −3 dB) when cached, because raw detection clips are often very quiet — without it, faint calls are inaudible.
+- A clip with **no real audio** (a near-silent recording) is treated as missing and shows **no button**, rather than a button that plays silence. So a play button appears only on recent/headline rows whose clip both exists and has audible content — not on every historical row.
+
+> **No sound in Safari?** Safari's default per-site **Auto-Play: "Stop Media with Sound"** silences the cards' in-browser playback (the playhead moves but you hear nothing). Fix it at Safari → **Settings for This Website…** (or Settings → Websites → Auto-Play) → set your Home Assistant site to **Allow All Auto-Play**. Chrome, Firefox and the HA app are unaffected.
 
 Point it at any list-bearing sensor:
 
