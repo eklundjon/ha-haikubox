@@ -60,9 +60,9 @@ If `position` exceeds the number of detections the sensor currently has, the car
 
 Most sensors' `detections` lists are **per-species** — one record per distinct bird. The card pointed at any of these shows the species ranked #1 by that sensor's criterion (most recent, rarest, most detected, etc.).
 
-`last_detection.detections` is the exception: it's **per-event** (one record per individual detection in the trailing 24 h). The card pointed at `last_detection` therefore shows the single most recent event, which is usually but not always the same species as the sensor's sticky state. See [sensors.md](sensors.md#per-species-vs-per-event-live-vs-sticky) for details.
+`last_detection.detections` is the exception: it's **per-event** (one record per individual detection), read from a persisted rolling cache of the 50 most recent events. The card pointed at `last_detection` therefore shows the single most recent event and keeps showing it through restarts and outages (#62). See [sensors.md](sensors.md#per-species-vs-per-event-live-vs-cached) for details.
 
-A **blank card on `last_detection`** specifically means the box has gone silent for >24 h — usually a hardware or connectivity problem worth investigating.
+`last_detection` no longer blanks on an outage — its rolling cache keeps the last detection regardless of age. The "box has gone silent" signal is instead **`notable_species` going `unknown`** (nothing notable in 24 h) or **`recent_detections` reading 0** — usually a hardware or connectivity problem worth investigating.
 
 ### Tap action
 
@@ -292,8 +292,8 @@ The card renders `detections[0]` from its bound entity's `detections` attribute.
 
 Common causes by sensor:
 
-- **`last_detection`** — the box has been silent for >24 h. Check the box's connectivity and power.
-- **`notable_species`** — trailing 24 h window; blank if nothing detected in 24 h.
+- **`last_detection`** — only blank before the box's very first detection; its rolling cache persists through restarts/outages, so a blank here on an established box is unexpected (check HA logs).
+- **`notable_species`** — observation window; `unknown`/blank when nothing is detected in 24 h (e.g. box offline). This is the intended "box has gone silent" signal.
 - **`daily_top_species`** — today's `/daily-count`; blank only before the first detection of the local day (or if that fetch is failing — check HA logs).
 - **`recent_detections`** — quiet hour. Normal during a sleeping-bird stretch.
 - **`new_species`** — would only be empty if `_seen_species` has never been populated (truly fresh install with API down on first poll). Look at HA logs.
