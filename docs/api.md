@@ -103,7 +103,7 @@ The integration's clock and the API's `dt` timestamps both live in UTC; the filt
 
 ### Polling cost
 
-One `/detections` call per poll, every 10 minutes → **144 detection calls per box per day**, plus roughly **one `/daily-count` fetch per day** in steady state (the newly-completed day), and per-species image fetches (write-once). On a *fresh* install there's also a one-time historical backfill — `RARITY_BACKFILL_CHUNK` (30) days per poll while the trailing year is still being covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for older history — each request spaced by `BACKFILL_REQUEST_DELAY` and walking back to the box's install date. It spreads over an hour or two for the rarity-relevant year, longer for the deep tail, rather than firing in one burst. Comfortably within any sensible rate budget.
+One `/detections` call per poll — at the default 10-minute interval that's **144 detection calls per box per day** (the interval is user-tunable to 5–60 min; see [docs/advanced.md](advanced.md)), plus roughly **one `/daily-count` fetch per day** in steady state (the newly-completed day), and per-species image fetches (write-once). On a *fresh* install there's also a one-time historical backfill — `RARITY_BACKFILL_CHUNK` (30) days per poll while the trailing year is still being covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for older history — each request spaced by `BACKFILL_REQUEST_DELAY` and walking back to the box's install date. It spreads over an hour or two for the rarity-relevant year, longer for the deep tail, rather than firing in one burst. Comfortably within any sensible rate budget.
 
 ## `GET /haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` — rarity baseline
 
@@ -114,12 +114,12 @@ Returns one calendar day's per-species counts as a flat list (`[{bird, count}]`)
 **The store.** Per-day counts accumulate in `.storage/haikubox.<serial>.daily_counts` as `{ "YYYY-MM-DD": { species: count } }`, **completed days only**, kept for the box's full lifetime (a reusable dataset). Each poll, `_ensure_daily_counts`:
 
 1. **Forward-fills** any newly-completed day(s) since the last run (newest-first, until it reaches data it already has).
-2. **Backfills** older history toward the install date — `RARITY_BACKFILL_CHUNK` (30) days per poll until the trailing `RARITY_WINDOW_DAYS` is covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for the deep-history tail — each spaced by `BACKFILL_REQUEST_DELAY`. A `404` means "before the box existed" — after `BACKFILL_STOP_AFTER_404` (3) consecutive 404s the backfill is marked complete.
+2. **Backfills** older history toward the install date — `RARITY_BACKFILL_CHUNK` (30) days per poll until the trailing `RARITY_WINDOW_DAYS` is covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for the deep-history tail — each spaced by `BACKFILL_REQUEST_DELAY`. A `404` means "before the box existed" — after `BACKFILL_STOP_AFTER_404` (14) consecutive 404s while extending older than all known data the backfill is marked complete (generous enough to walk through a multi-day outage and resume on real data beyond it).
 3. Persists once if anything changed (a `try/finally` ensures partial progress survives a mid-chunk failure or restart) — ~1 write/day in steady state.
 
 **Scoring.** `_rebuild_baseline` aggregates the trailing **`RARITY_WINDOW_DAYS`** (365) of stored counts into a `{species → rank}` map via `_ranks_from_counts`. That's what rarity divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `1.0` (capped, tied with the rarest known species). Because it's a sliding window, the same species' rarity stays stable across a calendar year-end instead of jumping.
 
-**Resilience.** The store rehydrates `_daily_counts` in [`_load_stores`](../custom_components/haikubox/coordinator.py) and the baseline is rebuilt at load, so rarity works immediately on restart from cached history. A `404`/empty body is "no data for that day" (never an error). A `429`/5xx during backfill is captured: backfill pauses until the next poll (~10 min — a natural backoff) and the 404 floor is **not** advanced, so a transient limit can't be mistaken for the install boundary. Only a true fresh install whose very first backfill found no data raises `UpdateFailed` (sensors `unavailable` until HA's automatic retry succeeds).
+**Resilience.** The store rehydrates `_daily_counts` in [`_load_stores`](../custom_components/haikubox/coordinator.py) and the baseline is rebuilt at load, so rarity works immediately on restart from cached history. A `404`/empty body is "no data for that day" (never an error). A `429`/5xx during backfill is captured: backfill pauses until the next poll (a natural backoff) and the 404 floor is **not** advanced, so a transient limit can't be mistaken for the install boundary. Only a true fresh install whose very first backfill found no data raises `UpdateFailed` (sensors `unavailable` until HA's automatic retry succeeds).
 
 ## Image CDN
 
@@ -142,13 +142,13 @@ The cache directory is indexed once at integration startup (`async_init` → `_i
 
 | Constant | Value | Source |
 |---|---|---|
-| `DEFAULT_SCAN_INTERVAL` | 600 s (10 min) | [`const.py`](../custom_components/haikubox/const.py) |
-| `RECENT_WINDOW_HOURS` | 1 (h) — client-side filter, not an API parameter | [`const.py`](../custom_components/haikubox/const.py) |
+| `DEFAULT_SCAN_INTERVAL` | 600 s (10 min) — user-tunable 5–60 min | [`const.py`](../custom_components/haikubox/const.py) |
+| `RECENT_WINDOW_HOURS` | 1 (h) — client-side filter, not an API parameter; user-tunable 1–24 h | [`const.py`](../custom_components/haikubox/const.py) |
 | `DAILY_WINDOW_HOURS` | 24 (h) | [`const.py`](../custom_components/haikubox/const.py) |
 
-`RECENT_WINDOW_HOURS = 1` gives a 6× overlap against the 10-minute poll interval — a single missed poll never loses recent detections, because the next poll's 24-hour fetch (and 1-hour client-side filter) re-includes anything the missed poll would have seen. `DAILY_WINDOW_HOURS = 24` is the API's documented maximum; bigger windows would need server-side aggregation that the public endpoint doesn't expose.
+`RECENT_WINDOW_HOURS = 1` gives a 6× overlap against the default 10-minute poll interval — a single missed poll never loses recent detections, because the next poll's 24-hour fetch (and 1-hour client-side filter) re-includes anything the missed poll would have seen. `DAILY_WINDOW_HOURS = 24` is the API's documented maximum; bigger windows would need server-side aggregation that the public endpoint doesn't expose.
 
-The user can override the cadence through HA's standard "Enable polling for updates" toggle plus a time-pattern automation — see [docs/advanced.md](advanced.md).
+Both the poll interval and the recent window are exposed in the options flow's **Advanced** section (along with the rarity and new-species windows) — see [docs/advanced.md](advanced.md). For a schedule-based cadence or polling outside the 5–60 min range, turn off HA's "Enable polling for updates" toggle and drive the refresh from a time-pattern automation (also in advanced.md).
 
 ## Failure handling
 
@@ -163,7 +163,7 @@ The user can override the cadence through HA's standard "Enable polling for upda
 | Image S3 fetch raises | Same — remote URL returned; failure is logged at DEBUG |
 | `/haikubox/<serial>` (device info) returns non-200 | Config flow surfaces `cannot_connect`; entry is not created |
 
-The integration does **not** retry within a single poll. Failed calls just wait for the next 10-minute tick — HA's coordinator does the right thing on its own.
+The integration does **not** retry within a single poll. Failed calls just wait for the next poll tick — HA's coordinator does the right thing on its own.
 
 ## Diagnostics
 

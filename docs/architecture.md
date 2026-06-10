@@ -23,7 +23,7 @@ graph TB
     end
 
     subgraph User-facing
-        Sensors["sensor.py + binary_sensor.py<br/>9 sensors + 1 binary sensor"]
+        Sensors["sensor.py + binary_sensor.py<br/>14 sensors + 1 binary sensor"]
         Cards["www/*.js<br/>bird-card + bird-list-card"]
         Diag["diagnostics.py<br/>redacted bundle"]
     end
@@ -31,7 +31,7 @@ graph TB
     subgraph External
         API["api.haikubox.com"]
         S3["haikubox-images S3"]
-        HAStore["HA .storage/<br/>7 JSON files"]
+        HAStore["HA .storage/<br/>6 JSON files"]
         WWW["HA www/haikubox/<br/>cached JPEGs"]
     end
 
@@ -62,7 +62,7 @@ custom_components/haikubox/
 ├── diagnostics.py        # redacted state dump
 ├── image_cache.py        # ImageCache class
 ├── manifest.json         # HACS manifest (version stamped on release)
-├── sensor.py             # 9 sensor classes
+├── sensor.py             # 14 sensor classes
 ├── strings.json          # translation keys → display names
 ├── translations/
 │   └── en.json
@@ -258,10 +258,10 @@ Both cards read sensor state from HA's frontend WebSocket connection — they ha
 ## Automation events
 
 The coordinator fires a single bus event, `haikubox_event`, for noteworthy
-detections, discriminated by a `type` field (`new_species` / `unusual_visitor`)
-— the same one-event-many-types convention HA uses for `deconz_event` /
-`bthome_ble_event`. `_fire_detection_events` runs at the end of each
-`_async_update_data`, after the lookup stores are updated:
+detections, discriminated by a `type` field (`new_species` / `unusual_visitor`
+/ `watched_species`) — the same one-event-many-types convention HA uses for
+`deconz_event` / `bthome_ble_event`. `_fire_detection_events` runs at the end of
+each `_async_update_data`, after the lookup stores are updated:
 
 - **`new_species`** fires for species in `newly_seen` — those first recorded
   this poll by the lifetime first-seen log. Naturally silent on a fresh-install
@@ -272,9 +272,14 @@ detections, discriminated by a `type` field (`new_species` / `unusual_visitor`)
   `_prev_recent_species` starts `None`, so the first poll of a session only
   baselines (no replay on restart); the edge gate stops re-firing while a bird
   lingers across polls.
+- **`watched_species`** fires when a species on the user's watch-list (the
+  options-flow pick-list plus the free-text extras) enters the recent window.
+  Same edge gate as `unusual_visitor` (`_prev_recent_species` baselines on the
+  first poll); a newly-seen watched bird fires both `new_species` and
+  `watched_species` — both are true.
 
 [`device_trigger.py`](../custom_components/haikubox/device_trigger.py) exposes
-both as device triggers. `async_attach_trigger` delegates to the core event
+all three (`TRIGGER_TYPES`) as device triggers. `async_attach_trigger` delegates to the core event
 trigger platform (`homeassistant.components.homeassistant.triggers.event`),
 filtered to `haikubox_event` with matching `device_id` + `type` — so the device
 picker entry is a thin, well-supported wrapper over the bus event rather than a
@@ -294,7 +299,7 @@ URL — see [docs/automations.md](automations.md).
 - **`_unrecorded_attributes = {"detections"}`** on every sensor. The `detections` lists can run to 50+ records with images and metadata; persisting them on every state change would bloat the recorder DB and trip HA's state-attribute size warnings. The lists stay on the live state object for cards to read.
 - **Idempotent migration on every setup.** The shim doesn't track "has migration run" — it just checks the registry. Cheap, no version flag to maintain, no chance of getting out of sync.
 - **24-hour bootstrap for `_seen_species`.** A fresh install seeds the lifetime first-seen log from the 24-hour window we already fetch every poll, so `new_species`/`new_detections` populate on poll 1 rather than treating every species as newly-discovered — see [docs/sensors.md](sensors.md) for the user-visible effect. (`last_detection` needs no bootstrap — its event buffer fills from poll 1's `/detections`; `notable_species` is live.)
-- **UTC day boundaries.** The coordinator's "today" is `datetime.now(timezone.utc).date()` — used to bound the trailing rarity window, the 7-day `rarest_species` window, and which `/daily-count` dates to fetch. This aligns with the API's UTC `dt` timestamps and makes the day boundary deterministic across hosts regardless of their local timezone.
+- **Box-local day boundaries.** The coordinator's "today" is `dt_util.now(await self._async_box_tz()).date()` — anchored to the *box's own* timezone (read from `/haikubox/<serial>`, falling back to HA's tz until it resolves). It bounds the trailing rarity window, the 7-day `rarest_species` window, the daily-volume sensors, and which `/daily-count` dates to fetch. The endpoint is keyed by the box's local calendar day, so a UTC "today" ran ahead of the box's day each evening and tripped `/daily-count` 400s (issue #16); the box-local boundary fixes that. Recency-window thresholds compared against raw detection `dt` values stay in UTC (absolute instants).
 - **Persisted lists where the data supports them.** `last_detection.detections` is a persisted rolling buffer of the 50 most recent individual events (per-event, not per-species), and `new_species.detections` the 50 most-recently-first-seen species from `_seen_species` — both survive restarts *and* outages, so the bird-card always has a populated `detections[0]` once the box has any history. `notable_species`, by contrast, is an explicit 24 h observation window: it drains to `unknown` in genuine 24h+ silence — that's the intended hardware/connectivity signal (#62), not a bug.
 - **Notability is user-tunable.** `notable_species` ranks by a `notability_score = w · rarity_score + (1 − w) · recency_score` blend. The weight `w` is exposed as a 0–100 % slider in the integration's options flow (Devices & Services → Haikubox → Configure). An `entry.add_update_listener` triggers `coordinator.async_request_refresh()` on slider change so the ranking updates within seconds, not at the next 10-min poll.
 - **Cards read state, not the coordinator.** That makes them dashboard-portable: a user can copy the card YAML between HA instances and it just works as long as the sensors are present.

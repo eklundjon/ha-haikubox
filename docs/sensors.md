@@ -15,11 +15,24 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | `sensor.yearly_top_species` | Number of species in the last 12 months | `detections` (ranked by 12-month count) |
 | `sensor.rarest_species` | Number of species, rolling 7 d | `detections` (ranked by rarity) |
 | `sensor.lifetime_species` | Distinct species ever detected on this box | — (plain count; `MEASUREMENT` state class for long-term statistics) |
+| `sensor.species_diversity` | Shannon diversity index (H′) over today's detections | `richness` (species count), `evenness` (Pielou H′/ln S, 0–1) |
+| `sensor.activity_level` | Most recent completed day's volume ÷ a typical day (1.0 ≈ normal, 2.0 ≈ twice as busy); **`unknown` until a baseline exists** | `as_of_date`, `day_total`, `typical_daily_count` |
+| `sensor.new_species_window` | How many species were first heard on this box in the last 30 days (discovery momentum) | `days_since_new_species` |
+| `sensor.history_start` | **Diagnostic** — earliest day the per-day `/daily-count` history reaches (a timestamp; walks back as the backfill runs, then holds) | `days_recorded`, `days_span`, `backfill_complete` |
 | `sensor.watched_species` | How many of your watch-list species the box has recorded | `detections` (your watched species, most-recently-heard first). Configure the watch-list in the integration's options; pairs with the **Watched species detected** trigger. |
 
 ### `sensor.lifetime_species`
 
 A running count of every distinct species the box has ever detected — your "life list." It only ever rises (the lifetime `seen_species` log never shrinks), and it carries a `MEASUREMENT` state class, so Home Assistant's long-term statistics chart it as a curve climbing over weeks and months. The same number is also exposed as the `lifetime_species_count` attribute on `new_species` for templates.
+
+### Activity & discovery sensors
+
+Four numeric sensors summarise *how* active and varied the box is, computed from the **true** per-species `/daily-count` figures (not the ≤5-per-species `/detections` sample, which would distort distributions):
+
+- **`species_diversity`** — the Shannon diversity index (H′) over today's detections: ~0 when one species dominates, higher when many species are heard evenly. `richness` (how many species) and `evenness` (Pielou's H′/ln S, 0–1) come along as attributes — diversity captures *how varied* activity is, not just how much.
+- **`activity_level`** — the most recent **completed** day's detection total divided by a typical day (the mean over the last 30 active days): `1.0` is a normal day, `2.0` twice as busy, `0.5` half. It compares completed days (not today's partial total), so it's stable rather than ramping through the day; `unknown` until there's a baseline.
+- **`new_species_window`** — how many species were first heard on this box in the last 30 days — a "discovery momentum" counter, high on a new install or during migration and settling toward 0 as the box learns the local regulars. `days_since_new_species` is exposed as an attribute. (The 30-day window is tunable — see [advanced.md](advanced.md).)
+- **`history_start`** *(diagnostic)* — the earliest day the per-day history reaches. On a fresh install it walks backward each poll as the throttled backfill runs, then holds at the box's install date. `days_recorded`, `days_span`, and `backfill_complete` report backfill progress.
 
 ## Binary sensors
 

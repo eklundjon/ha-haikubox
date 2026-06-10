@@ -33,7 +33,7 @@ The card is fully responsive to both width and height:
 
 The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio.
 
-Works with any **list-bearing** Haikubox sensor — that's 7 of the 8 (everything except `daily_count`, which is a numeric-only total with no per-species list). By default the card renders the **top-ranked** record (the #1 entry by that sensor's own measure). Empty list → empty card showing "No recent detections."
+Works with any **list-bearing** Haikubox sensor — the 8 that expose a per-species `detections` list (`recent_detections`, `last_detection`, `daily_top_species`, `notable_species`, `new_species`, `yearly_top_species`, `rarest_species`, `watched_species`). The numeric/diagnostic sensors (`daily_count`, `lifetime_species`, `species_diversity`, `activity_level`, `new_species_window`, `history_start`) have no list and aren't offered. By default the card renders the **top-ranked** record (the #1 entry by that sensor's own measure). Empty list → empty card showing "No recent detections."
 
 The relative timestamp ("5m ago", "2h ago") refreshes every 60 seconds independently of the sensor's poll cadence, so the label stays honest between the 10-minute poll intervals.
 
@@ -261,7 +261,7 @@ sections:
 
 Both cards have a visual editor that the dashboard exposes automatically — there's no need to write YAML by hand. To use it: click **Add card** (or pencil-edit an existing one) → pick the Haikubox card type → the form on the right lets you set the entity and (for the list card) title and max items.
 
-The entity picker is **pre-filtered to Haikubox sensors that expose a `detections` list** — so the 7 list-bearing sensors are offered, and `daily_count` (numeric-only) is hidden. Unrelated integrations are filtered out entirely.
+The entity picker is **pre-filtered to Haikubox sensors that expose a `detections` list** — so the 8 list-bearing sensors are offered, and the numeric/diagnostic ones (`daily_count`, `lifetime_species`, `species_diversity`, `activity_level`, `new_species_window`, `history_start`) are hidden. Unrelated integrations are filtered out entirely.
 
 The single-bird card's editor also includes a **Tap action** picker (more-info / navigate / url / none); URL/navigate paths can use `{species}`, `{species_slug}`, `{sp_code}`, and `{scientific_name}` tokens — see [Tap action](#tap-action) above for the full table and examples.
 
