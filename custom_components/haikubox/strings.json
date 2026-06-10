@@ -69,6 +69,22 @@
               "audio_cache_days": "The headline detections (last + notable) are always cached for 30 days. This caches the full recent feed for this many extra days too (heavier download). 0 = headline clips only. Roughly 74 KB/clip; the cache is hard-capped regardless.",
               "audio_norm_target": "Detection clips are often very quiet, so each is volume-normalized to this peak level (dBFS) when cached. Default -3 dB. Lower it if playback is too hot for your speakers; 0 dB is loudest but leaves no headroom and can clip on some outputs (-1 to -3 is safer)."
             }
+          },
+          "advanced": {
+            "name": "Advanced",
+            "description": "Window lengths and poll cadence. Defaults suit most boxes — change only if you know you want to.",
+            "data": {
+              "recent_window_hours": "Recent window",
+              "scan_interval": "Poll interval",
+              "rarity_window_days": "Rarity baseline window",
+              "new_species_window_days": "New-species momentum window"
+            },
+            "data_description": {
+              "recent_window_hours": "How far back the “Recent detections” sensor looks, and how long a species stays “recent” before it can re-fire a new/unusual/watched trigger. Default 1 hour. Longer means a fuller recent list but fewer repeat alerts.",
+              "scan_interval": "How often the box is polled, in minutes (5–60, default 10). Shorter is fresher but more API load (and a faster audio/backfill cadence).",
+              "rarity_window_days": "Trailing days of detection history used to rank rarity (the notable/rarest sensors and the rarity_score on events). Default 365. Shorter favors seasonal rarity; longer trends toward all-time. Rebuilt from stored daily counts on the next poll — cheap to change.",
+              "new_species_window_days": "Trailing days for the “new species” momentum sensor — how many species were first heard here within this window. Default 30. Display-only; affects just that sensor."
+            }
           }
         }
       }

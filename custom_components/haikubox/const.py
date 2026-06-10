@@ -6,16 +6,23 @@ CONF_DEVICE_NAME = "device_name"
 API_BASE = "https://api.haikubox.com"
 IMAGES_BASE = "https://haikubox-images.s3.amazonaws.com"
 
-# How often to poll the API (seconds)
+# How often to poll the API (seconds). User-tunable via the options flow as
+# CONF_SCAN_INTERVAL (in MINUTES; floor 5, ceiling 60) — HA lets users disable
+# polling but not set a custom rate, so this fills that gap. Shorter = fresher
+# but more API load (and faster audio/backfill cadence).
 DEFAULT_SCAN_INTERVAL = 600  # 10 minutes
+CONF_SCAN_INTERVAL = "scan_interval"  # stored in minutes
 
 # Sliding window for the recent_detections sensor + the new-species
 # / 7-day-store pipelines. The integration makes exactly one /detections call
 # per poll (hours=DAILY_WINDOW_HOURS) and filters that response client-side by
 # this many hours for the recent view — the 1-hour window was previously a
 # separate API request, but every consumer of it can be derived from the 24h
-# response with a timestamp filter.
+# response with a timestamp filter. User-tunable via CONF_RECENT_WINDOW_HOURS
+# (1–24): widens the recent_detections sensor AND the device-trigger re-alert
+# window (a species won't re-fire new/unusual/watched while still inside it).
 RECENT_WINDOW_HOURS = 1
+CONF_RECENT_WINDOW_HOURS = "recent_window_hours"
 
 # Rolling window for the "daily" sensors. For these we want a true trailing
 # 24-hour view, so we derive it from /detections (24 is the endpoint's max)
@@ -39,7 +46,10 @@ NEW_SPECIES_HISTORY_LIMIT = 50
 
 # Trailing window for the "new species (N d)" momentum sensor — how many
 # species were first heard on this box within the last this-many days.
+# User-tunable via CONF_NEW_SPECIES_WINDOW_DAYS (display-only; affects just that
+# sensor).
 NEW_SPECIES_WINDOW_DAYS = 30
+CONF_NEW_SPECIES_WINDOW_DAYS = "new_species_window_days"
 
 # Notable-species tuning. notability_score is a weighted blend of rarity
 # and recency: w * rarity_score + (1-w) * recency_score. The user-facing
@@ -74,7 +84,11 @@ CONF_WATCHED_EXTRA = "watched_species_extra"   # newline-separated free text
 # counts from /daily-count?date=<d> and aggregate a trailing window. The store
 # keeps full box-lifetime daily counts (a reusable dataset — trends, phenology,
 # true first-seen); rarity sums only the trailing RARITY_WINDOW_DAYS.
+# User-tunable via CONF_RARITY_WINDOW_DAYS (30–730): shorter = seasonal rarity,
+# longer = all-time. Re-ranks notable_species / rarest_species; cheap to change
+# (rebuilt from the stored daily counts on the next poll).
 RARITY_WINDOW_DAYS = 365
+CONF_RARITY_WINDOW_DAYS = "rarity_window_days"
 # "Typical" daily activity for the activity-vs-typical sensor: mean detection
 # total over the trailing this-many *completed* days (zero/offline days
 # excluded, so it reflects a typical active day, not one dragged down by an
