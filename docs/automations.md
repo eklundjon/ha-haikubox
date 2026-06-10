@@ -76,7 +76,7 @@ notify.
 
 ## Event reference
 
-Under the hood both triggers are filtered views of a single bus event,
+Under the hood all three triggers are filtered views of a single bus event,
 `haikubox_event`, discriminated by its `type` field. You can also trigger on
 the raw event (**When → Other → Manual event**, event type `haikubox_event`)
 if you want to react to several boxes at once or match on the payload yourself.
