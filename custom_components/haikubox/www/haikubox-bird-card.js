@@ -1,9 +1,31 @@
+// Bird photo card. This shares its render/logic with ha-birdweather's
+// birdweather-bird-card.js — the two are kept identical BY HAND except for
+// (a) integration wiring (names / platform / entity filter) and (b) the
+// FEATURES object below, which hides editor toggles for data this integration
+// doesn't provide. The render code carries the full feature set (confidence
+// band, photo attribution, blur-fill, play-the-call) and null-guards on missing
+// data, so an unsupported feature simply never appears. When you change one
+// card, mirror it in the other.
 function _esc(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Per-integration feature flags. The render code carries the full feature set
+// and null-guards on missing data, so an unsupported feature simply never
+// renders; the only divergence between the Haikubox and BirdWeather cards is
+// this object plus integration wiring. Haikubox surfaces no confidence or
+// photo-credit data, so those editor toggles are hidden here.
+const FEATURES = { confidence: false, attribution: false };
+
+// Confidence band → display label. The integration derives the low/medium/high
+// band from each detection's numeric confidence and surfaces it as
+// `confidence_band`; the card just labels it (the raw number stays hidden).
+function _bandLabel(band) {
+  return { low: "Low", medium: "Medium", high: "High" }[band] ?? "";
 }
 
 // Editor entity-picker filter: only show Haikubox sensors that expose
@@ -41,7 +63,10 @@ class HaikuboxBirdCardEditor extends HTMLElement {
         this._pathField.value = this._pathValue;
         this._syncPathField();
       }
+      if (this._attrField) this._attrField.value = config.show_attribution !== false;
+      if (this._confField) this._confField.value = config.show_confidence !== false;
       if (this._audioField) this._audioField.value = config.show_audio !== false;
+      if (this._detailsField) this._detailsField.value = config.show_details !== false;
     }
   }
 
@@ -189,17 +214,65 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       this.appendChild(path);
       this._syncPathField();
 
+      // Photo credit toggle (default on). The station photos are CC-licensed,
+      // so the credit is normally required — hiding it may breach the licence.
+      if (FEATURES.attribution) {
+        const attr = document.createElement("ha-selector");
+        attr.label = "Show photo credit";
+        attr.selector = { boolean: {} };
+        if (this._hass) attr.hass = this._hass;
+        attr.value = this._config?.show_attribution !== false;
+        attr.style.cssText = "display:block;padding:0 16px 16px";
+        attr.addEventListener("value-changed", (e) =>
+          this._fire({ show_attribution: e.detail.value })
+        );
+        this._attrField = attr;
+        this.appendChild(attr);
+      }
+
+      // Confidence band toggle (default on). Shows a low/medium/high label
+      // under the timestamp for detections that carry a confidence.
+      if (FEATURES.confidence) {
+        const conf = document.createElement("ha-selector");
+        conf.label = "Show confidence";
+        conf.selector = { boolean: {} };
+        if (this._hass) conf.hass = this._hass;
+        conf.value = this._config?.show_confidence !== false;
+        conf.style.cssText = "display:block;padding:0 16px 16px";
+        conf.addEventListener("value-changed", (e) =>
+          this._fire({ show_confidence: e.detail.value })
+        );
+        this._confField = conf;
+        this.appendChild(conf);
+      }
+
       // "Play the call" toggle (default on). Adds a play button over the photo
-      // that plays the detection's recording (cached locally) in the browser.
+      // that plays the detection's soundscape recording in the browser.
       const audio = document.createElement("ha-selector");
       audio.label = "Show play-call button";
       audio.selector = { boolean: {} };
       if (this._hass) audio.hass = this._hass;
       audio.value = this._config?.show_audio !== false;
       audio.style.cssText = "display:block;padding:0 16px 16px";
-      audio.addEventListener("value-changed", (e) => this._fire({ show_audio: e.detail.value }));
+      audio.addEventListener("value-changed", (e) =>
+        this._fire({ show_audio: e.detail.value })
+      );
       this._audioField = audio;
       this.appendChild(audio);
+
+      // "Details" button toggle (default on). Adds an ⓘ button over the photo
+      // that opens this bird's full detail view in a popup.
+      const details = document.createElement("ha-selector");
+      details.label = "Show details button";
+      details.selector = { boolean: {} };
+      if (this._hass) details.hass = this._hass;
+      details.value = this._config?.show_details !== false;
+      details.style.cssText = "display:block;padding:0 16px 16px";
+      details.addEventListener("value-changed", (e) =>
+        this._fire({ show_details: e.detail.value })
+      );
+      this._detailsField = details;
+      this.appendChild(details);
     }
   }
 }
@@ -289,8 +362,8 @@ class HaikuboxBirdCard extends HTMLElement {
     }
   }
 
-  // Play/pause the detection's recording in the browser (one Audio instance).
-  // Failures (unavailable / unsupported) fall back to the play glyph.
+  // Play/pause the detection's soundscape in the browser (one Audio instance).
+  // FLAC plays in modern browsers; failures fall back to the play glyph.
   _togglePlay(btn) {
     const url = btn.dataset.audio;
     if (!url) return;
@@ -382,11 +455,35 @@ class HaikuboxBirdCard extends HTMLElement {
     }
   }
 
-  // Custom action: pop up a modal showing the full ranked species list
-  // for this card's sensor, using the bird-list card. Native <dialog>
-  // gives us a backdrop, focus trap, and ESC-to-close for free; no
-  // external dependency (e.g. browser_mod) required.
+  // Custom action: pop up a modal showing the full ranked species list for
+  // this card's sensor, using the bird-list card.
   _openListPopup() {
+    this._openCardPopup(
+      { entity: this._config?.entity, top: 50, row_size: "large" },
+      "display:block;width:min(92vw,560px);height:min(80vh,720px)",
+    );
+  }
+
+  // "Details" button: pop up THIS bird's full detail view — the bird-list card
+  // in detail_only mode, scoped to this card's `position`. Reuses the list
+  // card's entire detail render (description, sparkline, audio, links,
+  // attribution); no duplicated rendering here.
+  _openDetailsPopup() {
+    this._openCardPopup(
+      {
+        entity: this._config?.entity,
+        position: this._config?.position ?? 1,
+        detail_only: true,
+        row_size: "large",
+      },
+      "display:block;width:clamp(320px,70vw,920px);height:auto;max-height:85vh;overflow:auto",
+    );
+  }
+
+  // Shared <dialog> popup hosting a haikubox-bird-list-card. Native <dialog>
+  // gives us a backdrop, focus trap, and ESC-to-close for free; no external
+  // dependency (e.g. browser_mod) required.
+  _openCardPopup(cardConfig, sizeCss) {
     const entity = this._config?.entity;
     if (!entity || !customElements.get("haikubox-bird-list-card")) return;
     if (this._popupDialog) return;  // already open
@@ -409,12 +506,12 @@ class HaikuboxBirdCard extends HTMLElement {
 
     const listCard = document.createElement("haikubox-bird-list-card");
     try {
-      listCard.setConfig({ entity, top: 50, row_size: "large" });
+      listCard.setConfig(cardConfig);
     } catch (_) {
       return;
     }
     // Give the card a concrete box; its internal list scrolls past this.
-    listCard.style.cssText = "display:block;width:min(92vw,560px);height:min(80vh,720px)";
+    listCard.style.cssText = sizeCss;
     if (this._hass) listCard.hass = this._hass;
 
     dialog.appendChild(listCard);
@@ -435,6 +532,21 @@ class HaikuboxBirdCard extends HTMLElement {
     dialog.showModal();
   }
 
+  // Photo credit/license caption. The coordinator sanitises Haikubox's
+  // (HTML) credit into plain text + a URL, so these are safe to link. Shown
+  // because the station photos are CC-licensed and require attribution.
+  _attributionHtml(bird) {
+    const link = (text, url) =>
+      url
+        ? `<a href="${_esc(url)}" target="_blank" rel="noopener noreferrer">${_esc(text)}</a>`
+        : _esc(text);
+    const parts = [];
+    if (bird.image_credit) parts.push(link(bird.image_credit, bird.image_credit_url));
+    if (bird.image_license) parts.push(link(bird.image_license, bird.image_license_url));
+    if (!parts.length) return "";
+    return `<div class="attribution" title="Photo credit">📷 ${parts.join(" · ")}</div>`;
+  }
+
   _render() {
     // Defensive: HA's card lifecycle is normally setConfig → set hass
     // (which calls _render), but during a reload or first-mount edge
@@ -452,7 +564,18 @@ class HaikuboxBirdCard extends HTMLElement {
     // `position` (1-based) selects which ranked entry to show.
     const top = Array.isArray(attrs.detections) ? attrs.detections[this._index()] : null;
     const bird = top
-      ? { species: top.species, image_url: top.image_url, scientific_name: top.scientific_name, last_seen: top.last_seen, audio_url: top.audio_url }
+      ? {
+          species: top.species,
+          image_url: top.image_url,
+          scientific_name: top.scientific_name,
+          last_seen: top.last_seen,
+          confidence_band: top.confidence_band,
+          audio_url: top.audio_url,
+          image_credit: top.image_credit,
+          image_credit_url: top.image_credit_url,
+          image_license: top.image_license,
+          image_license_url: top.image_license_url,
+        }
       : null;
     const empty = !bird || !bird.species;
     const actionable = (this._config.tap_action?.action ?? "more-info") !== "none";
@@ -485,32 +608,52 @@ class HaikuboxBirdCard extends HTMLElement {
         }
 
         /*
-         * Portrait layout — three priorities when vertical space is tight:
-         *  1. Crop the photo (fill full width, but no wider than 3:2 aspect ratio)
-         *  2. Drop the scientific name   [portrait B query below]
-         *  3. Shrink the photo to 3:2, centre horizontally  [portrait C query below]
+         * Portrait layout — priorities when vertical space is tight. The photo
+         * is always FULL WIDTH (a contained image over an edge-to-edge blur
+         * fill), so the fill reaches both side edges in every case:
+         *  1. Photo height = card width (square), capped to leave a text area
+         *  2. Drop the scientific name         [portrait B query below]
+         *  3. Reduce the photo height for text  [portrait C query below]
          */
         .img-wrap {
           flex: 0 0 auto;
-          position: relative;  /* anchors the play-call overlay */
+          position: relative;
           /*
            * Portrait: photo height = card width (square), but not more than
            * card height minus a text area. The reserve grows with card
-           * height (clamped 72–160px) so the responsive species text below
-           * has room to grow on large cards instead of being clipped.
+           * height (clamped 104–200px) so the responsive text block below —
+           * up to four lines (species, scientific name, time, confidence) —
+           * has room to grow on large cards instead of being clipped under
+           * the photo. Sized for the worst case so the species name never
+           * collides with the photo / its credit overlay.
            */
-          height: min(100cqw, calc(100cqh - clamp(72px, 26cqh, 160px)));
+          height: min(100cqw, calc(100cqh - clamp(104px, 34cqh, 200px)));
           width: 100%;
           align-self: center;
           overflow: hidden;
           border-radius: var(--ha-card-border-radius, 4px)
             var(--ha-card-border-radius, 4px) 0 0;
         }
+        /* Blur-fill: show the whole photo (contain) so the bird is never
+         * cropped, over a blurred, zoomed copy of the same image that fills
+         * the box. Aspect-agnostic — handles Haikubox's 1:1 source (and any
+         * other ratio) in any card shape without slicing off heads/feet. */
+        .img-blur {
+          position: absolute;
+          inset: 0;
+          z-index: 0;
+          background-size: cover;
+          background-position: center;
+          filter: blur(16px) saturate(1.15);
+          transform: scale(1.2);  /* overscan to hide the blurred edges */
+        }
         img {
           display: block;
+          position: relative;
+          z-index: 1;
           width: 100%;
           height: 100%;
-          object-fit: cover;
+          object-fit: contain;
         }
         .img-placeholder {
           width: 100%;
@@ -521,33 +664,6 @@ class HaikuboxBirdCard extends HTMLElement {
           background: var(--secondary-background-color);
           font-size: 3em;
         }
-        /* "Play the call" — a round button over the photo (bottom-left). Plays
-         * the detection's recording (cached locally) in the browser. */
-        .play-call {
-          position: absolute;
-          left: 6px;
-          bottom: 6px;
-          z-index: 2;
-          width: 34px;
-          height: 34px;
-          padding: 0;
-          border: none;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 0.95rem;
-          line-height: 1;
-          color: #fff;
-          background: rgba(0, 0, 0, 0.5);
-          cursor: pointer;
-        }
-        .play-call:hover { background: rgba(0, 0, 0, 0.7); }
-        .play-call:focus-visible {
-          outline: 2px solid var(--primary-color);
-          outline-offset: 2px;
-        }
-        .play-call.playing { background: var(--accent-color, #ff9800); }
         /* Body fills remaining space; justify-content centres text vertically */
         .body {
           flex: 1 1 auto;
@@ -586,24 +702,25 @@ class HaikuboxBirdCard extends HTMLElement {
           }
         }
 
-        /*
-         * Portrait priority 2: drop scientific name when card is wider than ~1:1.
-         * max-aspect-ratio: 3/2 limits this rule to portrait mode only.
-         */
-        @container (min-aspect-ratio: 1.05) and (max-aspect-ratio: 3/2) {
-          .scientific { display: none; }
-        }
+        /* The scientific name is always shown in portrait now. (It used to be
+         * dropped at aspect 1.05–1.5; many squat-but-roomy cards lost it with
+         * space to spare.) If a layout looks crowded, grow the photo-height
+         * reserve rather than hiding the name. */
 
         /*
-         * Portrait priority 3: card is too short for full-width 3:2 photo + text.
-         * Shrink photo to 3:2, centre horizontally.
-         * 54px ≈ 2-line body (20px padding + 18px species + 13px time + 3px gap).
+         * Portrait priority 3: card is too short for a full-height photo + text.
+         * Reduce the photo HEIGHT to free text space — but keep it FULL WIDTH so
+         * the blur-fill still reaches the card's side edges (the contained image
+         * just letterboxes within). (It used to shrink to a centered 3:2 box, a
+         * leftover from the object-fit:cover era, which left bare card showing
+         * at the sides.) The body here can be up to four lines (species,
+         * scientific name, time, confidence); reserve clamps 86–160px. If the
+         * name rides up under the photo on squat cards, grow this reserve.
          */
         @container (min-aspect-ratio: 1.2) and (max-aspect-ratio: 3/2) {
           .img-wrap {
-            flex: 0 0 auto;
-            height: calc(100cqh - clamp(54px, 20cqh, 120px));
-            width: min(100cqw, calc((100cqh - clamp(54px, 20cqh, 120px)) * 1.5));
+            height: calc(100cqh - clamp(86px, 30cqh, 160px));
+            width: 100%;
           }
         }
 
@@ -632,10 +749,31 @@ class HaikuboxBirdCard extends HTMLElement {
           font-size: clamp(0.75rem, 2cqw + 1.1cqh, 1.15rem);
           color: var(--secondary-text-color);
         }
+        /* Confidence band — a colored dot + low/medium/high label. The dot
+         * carries the band colour; the text stays in the secondary colour so
+         * it reads as a quiet caption, not an alert. */
+        .confidence {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: clamp(0.72rem, 1.8cqw + 1cqh, 1.05rem);
+          color: var(--secondary-text-color);
+        }
+        .confidence .dot {
+          width: 0.6em;
+          height: 0.6em;
+          border-radius: 50%;
+          flex-shrink: 0;
+          background: var(--secondary-text-color);
+        }
+        .confidence.conf-high .dot { background: var(--success-color, #43a047); }
+        .confidence.conf-medium .dot { background: var(--warning-color, #fb8c00); }
+        .confidence.conf-low .dot { background: var(--error-color, #e53935); }
 
-        /* Wide layout: drop scientific / shrink fonts when card is very short */
+        /* Wide layout: drop scientific + confidence / shrink fonts when short */
         @container (aspect-ratio > 3/2) and (max-height: 71px) {
-          .scientific { display: none; }
+          .scientific,
+          .confidence { display: none; }
         }
         @container (aspect-ratio > 3/2) and (max-height: 51px) {
           .species { font-size: 0.95em; }
@@ -647,6 +785,81 @@ class HaikuboxBirdCard extends HTMLElement {
           color: var(--secondary-text-color);
           font-style: italic;
         }
+        /* Photo credit/license — required for the CC-licensed station photos. */
+        .attribution {
+          position: absolute;
+          right: 0;
+          bottom: 0;
+          z-index: 2;  /* above the blur layer (0) and the photo (1) */
+          max-width: 100%;
+          box-sizing: border-box;
+          padding: 1px 6px;
+          font-size: clamp(0.6rem, 1.3cqw + 0.4cqh, 0.72rem);
+          line-height: 1.3;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.45);
+          border-top-left-radius: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .attribution a {
+          color: inherit;
+          text-decoration: underline;
+        }
+        /* "Play the call" — a round button over the photo (bottom-left, opposite
+         * the credit). Plays the detection's soundscape in-browser. */
+        .play-call {
+          position: absolute;
+          left: 6px;
+          bottom: 6px;
+          z-index: 3;  /* above the blur (0), photo (1), credit (2) */
+          width: 34px;
+          height: 34px;
+          padding: 0;
+          border: none;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.95rem;
+          line-height: 1;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.5);
+          cursor: pointer;
+        }
+        .play-call:hover { background: rgba(0, 0, 0, 0.7); }
+        .play-call:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+        .play-call.playing { background: var(--accent-color, #ff9800); }
+        /* "Details" button — round overlay, bottom-right (opposite play). Opens
+         * this bird's full detail view in a popup. */
+        .details-btn {
+          position: absolute;
+          right: 6px;
+          bottom: 6px;
+          z-index: 3;  /* above the blur (0), photo (1), credit (2) */
+          width: 34px;
+          height: 34px;
+          padding: 0;
+          border: none;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.1rem;
+          line-height: 1;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.5);
+          cursor: pointer;
+        }
+        .details-btn:hover { background: rgba(0, 0, 0, 0.7); }
+        .details-btn:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
       </style>
       <ha-card class="${actionable ? "actionable" : ""}"${actionable ? ' role="button" tabindex="0"' : ""}>
         <div class="layout">
@@ -655,10 +868,17 @@ class HaikuboxBirdCard extends HTMLElement {
           ` : `
             <div class="img-wrap">
               ${bird.image_url
-                ? `<img src="${_esc(bird.image_url)}" alt="${_esc(bird.species)}">`
+                ? `<div class="img-blur" style="background-image:url('${_esc(bird.image_url)}')"></div>
+                   <img src="${_esc(bird.image_url)}" alt="${_esc(bird.species)}">`
                 : `<div class="img-placeholder">🐦</div>`}
+              ${bird.image_url && this._config.show_attribution !== false
+                ? this._attributionHtml(bird)
+                : ""}
               ${this._config.show_audio !== false && bird.audio_url
                 ? `<button class="play-call" type="button" data-audio="${_esc(bird.audio_url)}" aria-label="Play recording of ${_esc(bird.species)}" title="Play call">▶</button>`
+                : ""}
+              ${this._config.show_details !== false
+                ? `<button class="details-btn" type="button" aria-label="Show details for ${_esc(bird.species)}" title="Details">ⓘ</button>`
                 : ""}
             </div>
             <div class="body">
@@ -666,6 +886,9 @@ class HaikuboxBirdCard extends HTMLElement {
                 <div class="species">${_esc(bird.species)}</div>
                 <div class="scientific">${_esc(bird.scientific_name ?? "")}</div>
                 <div class="time">${_esc(this._relativeTime(bird.last_seen))}</div>
+                ${this._config.show_confidence !== false && bird.confidence_band
+                  ? `<div class="confidence conf-${_esc(bird.confidence_band)}" title="Detection confidence"><span class="dot"></span>${_esc(_bandLabel(bird.confidence_band))} confidence</div>`
+                  : ""}
               </div>
             </div>
           `}
@@ -678,12 +901,22 @@ class HaikuboxBirdCard extends HTMLElement {
     const img = this.shadowRoot.querySelector(".img-wrap img");
     if (img) {
       img.addEventListener("error", () => {
+        // Drop the blurred backdrop too (its background-image is the same
+        // broken URL) so a failed load falls back cleanly to the placeholder.
+        this.shadowRoot.querySelector(".img-wrap .img-blur")?.remove();
         const placeholder = document.createElement("div");
         placeholder.className = "img-placeholder";
         placeholder.textContent = "🐦";
         img.replaceWith(placeholder);
       });
     }
+
+    // Let credit/license links work without also triggering the card's tap
+    // action (more-info), and without keyboard activation bubbling up.
+    this.shadowRoot.querySelectorAll(".attribution a").forEach((a) => {
+      a.addEventListener("click", (e) => e.stopPropagation());
+      a.addEventListener("keydown", (e) => e.stopPropagation());
+    });
 
     // Play-call button: play in-browser without triggering the card tap action.
     const playBtn = this.shadowRoot.querySelector(".play-call");
@@ -693,6 +926,19 @@ class HaikuboxBirdCard extends HTMLElement {
         this._togglePlay(playBtn);
       });
       playBtn.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+      });
+    }
+
+    // Details button: open this bird's full detail popup. stopPropagation keeps
+    // it from also firing the card's tap action.
+    const detailsBtn = this.shadowRoot.querySelector(".details-btn");
+    if (detailsBtn) {
+      detailsBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._openDetailsPopup();
+      });
+      detailsBtn.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") e.stopPropagation();
       });
     }
