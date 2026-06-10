@@ -702,13 +702,10 @@ class HaikuboxBirdCard extends HTMLElement {
           }
         }
 
-        /*
-         * Portrait priority 2: drop scientific name when card is wider than ~1:1.
-         * max-aspect-ratio: 3/2 limits this rule to portrait mode only.
-         */
-        @container (min-aspect-ratio: 1.05) and (max-aspect-ratio: 3/2) {
-          .scientific { display: none; }
-        }
+        /* The scientific name is always shown in portrait now. (It used to be
+         * dropped at aspect 1.05–1.5; many squat-but-roomy cards lost it with
+         * space to spare.) If a layout looks crowded, grow the photo-height
+         * reserve rather than hiding the name. */
 
         /*
          * Portrait priority 3: card is too short for a full-height photo + text.
@@ -716,9 +713,9 @@ class HaikuboxBirdCard extends HTMLElement {
          * the blur-fill still reaches the card's side edges (the contained image
          * just letterboxes within). (It used to shrink to a centered 3:2 box, a
          * leftover from the object-fit:cover era, which left bare card showing
-         * at the sides.) The scientific name is already hidden (priority 2), so
-         * the body is up to three lines (species, time, confidence); reserve
-         * clamps 86–160px to fit them without the name riding up under the photo.
+         * at the sides.) The body here can be up to four lines (species,
+         * scientific name, time, confidence); reserve clamps 86–160px. If the
+         * name rides up under the photo on squat cards, grow this reserve.
          */
         @container (min-aspect-ratio: 1.2) and (max-aspect-ratio: 3/2) {
           .img-wrap {
