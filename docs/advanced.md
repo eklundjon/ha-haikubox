@@ -2,7 +2,7 @@
 
 ## Polling
 
-By default the integration polls the Haikubox API every **10 minutes**, making a single 24-hour detections request — the 1-hour recent window used by `recent_detections` and the sticky-sensor live path is derived client-side from that same response. The rarity baseline is a rolling 12-month window assembled from per-day `/daily-count` history: one newly-completed day is fetched per day, plus a throttled one-time historical backfill on a fresh install.
+By default the integration polls the Haikubox API every **10 minutes**, making a single 24-hour detections request — the 1-hour recent window used by `recent_detections` and the new-species tracker is derived client-side from that same response. The rarity baseline is a rolling 12-month window assembled from per-day `/daily-count` history: one newly-completed day is fetched per day, plus a throttled one-time historical backfill on a fresh install.
 
 ### Changing the polling cadence
 

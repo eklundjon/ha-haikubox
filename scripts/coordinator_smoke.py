@@ -63,12 +63,11 @@ async def main() -> None:
     c._audio = None  # canned data has no wav → audio resolve short-circuits
     c._audio_enabled = False
     c._latest_wav_by_species = {}
-    c._last_detected = None
-    c._last_notable = None
+    c._event_buffer = []
     c._prev_recent_species = None
     c._stores_loaded = True
     for attr in ("_store", "_sp_codes_store", "_sci_names_store", "_last_seen_store",
-                 "_daily_store", "_sticky_store"):
+                 "_daily_store", "_events_store"):
         setattr(c, attr, _FakeStore())
     c._sp_codes, c._sci_names, c._last_seen, c._seen_species = {}, {}, {}, {}
     c._baseline_ranks, c._baseline_species_count, c._baseline_items = {}, 0, []

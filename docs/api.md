@@ -71,7 +71,7 @@ This endpoint is **not** polled — once the entry is created, the device name i
 
 **Where:** [`coordinator.py:_fetch_detections`](../custom_components/haikubox/coordinator.py)
 
-The endpoint accepts integer `hours` in `1..24` and returns a flat list of every detection inside that trailing window. The integration calls it **once per poll**, always with `hours=24`. Everything else — the 1-hour `recent_detections` sensor, sticky updates, new-species tracking, the 7-day rarity store — is derived from that single response by filtering the raw items client-side on their `dt` timestamps.
+The endpoint accepts integer `hours` in `1..24` and returns a flat list of every detection inside that trailing window. The integration calls it **once per poll**, always with `hours=24`. Everything else — the 1-hour `recent_detections` sensor, the `last_detection` event cache, new-species tracking, the 7-day rarity store — is derived from that single response by filtering the raw items client-side on their `dt` timestamps.
 
 The response passes through `_normalise_detections` ([coordinator.py](../custom_components/haikubox/coordinator.py)) which:
 
@@ -96,9 +96,9 @@ The integration's clock and the API's `dt` timestamps both live in UTC; the filt
 
 | Sensor / pipeline | Window source |
 |---|---|
-| `recent_detections`, sticky updates (live), recent-window new-species tracker | Recent subset (client-side filter, 1 h) |
-| `daily_count`, `daily_top_species`, `notable_species`, today's contribution to `rarest_species`, fresh-install bootstraps (sticky + `_seen_species`) | Full 24-hour normalisation |
-| `last_detection.detections` (per-event log) | Full 24-hour raw payload (sorted by `dt` desc, top 50) |
+| `recent_detections`, recent-window new-species tracker | Recent subset (client-side filter, 1 h) |
+| `daily_count`, `daily_top_species`, `notable_species`, today's contribution to `rarest_species`, the fresh-install `_seen_species` bootstrap | Full 24-hour normalisation |
+| `last_detection.detections` (per-event log) | Persisted rolling cache, fed each poll from the 24-hour raw payload (top 50 by `dt`); survives outages — #62 |
 | `new_species.detections` (lifetime history) | `_seen_species` log (sticky across polls and restarts) |
 
 ### Polling cost

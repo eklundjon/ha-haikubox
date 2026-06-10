@@ -99,7 +99,9 @@ class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
 
 
 class HaikuboxLastDetectionSensor(_HaikuboxSensor):
-    """Name of the most recently detected species."""
+    """Name of the most recently detected species — the last detection no matter
+    how long ago. Backed by a persisted rolling event cache, so it survives
+    restarts and outages instead of draining when the live feed empties (#62)."""
 
     _attr_translation_key = "last_detection"
     _attr_icon = "mdi:bird"
@@ -123,8 +125,9 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
 
     @property
     def extra_state_attributes(self) -> dict:
-        # `detections` is per-event (one record per individual detection
-        # in the trailing 24h, capped at LAST_DETECTION_EVENT_LIMIT), in
+        # `detections` is per-event (one record per individual detection),
+        # from a persisted rolling cache of the last LAST_DETECTION_EVENT_LIMIT
+        # events (newest-first; survives restarts/outages — #62), in
         # contrast to recent_detections.detections which is per-species.
         # Same attribute name; same field shape per record; different
         # records-per-X semantic. The bird card reads detections[0] for
@@ -181,11 +184,14 @@ class HaikuboxDailyTopSpeciesSensor(_HaikuboxSensor):
 
 
 class HaikuboxNotableSpeciesSensor(_HaikuboxSensor):
-    """Most unusual species detected in the recent window.
+    """Most "notable" species observed in the last 24 h — a tunable rarity/
+    recency blend. Rarity is measured against this box's own trailing-window
+    baseline; a species ranked low (or absent) scores close to 1.0.
 
-    Rarity is measured against this box's own trailing-window baseline — a
-    species ranked low (or absent) in that baseline scores close to 1.0.
-    State persists after the detection window empties.
+    Observation-windowed: unlike last_detection it does NOT persist. When
+    nothing is observed in the 24 h window (box quiet/offline) the state and
+    `detections[]` drain together — the state becomes `unknown` and falls back
+    to the bird-off icon (#62).
     """
 
     _attr_translation_key = "notable_species"

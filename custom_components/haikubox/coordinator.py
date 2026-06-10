@@ -145,11 +145,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # when the per-day history changes).
         self._reconciled_once: bool = False
 
-        # Sticky records — set on first detection, never cleared; persisted
-        # so last_detection / notable_species survive an HA restart instead
-        # of resetting to "unknown" until the next live detection.
-        self._last_detected: dict[str, Any] | None = None
-        self._last_notable: dict[str, Any] | None = None
+        # Rolling buffer of the most-recent detection EVENTS (newest-first,
+        # capped at LAST_DETECTION_EVENT_LIMIT), persisted. This is what backs
+        # last_detection: "the last detection" is the last detection no matter
+        # how old, so it must NOT drain when the live /detections feed empties
+        # (box offline). The buffer survives restarts and outages; its head is
+        # the last_detection state. (Replaces the old sticky single — see #62.)
+        # notable_species is deliberately NOT sticky: it's "notable observed in
+        # the last 24 h", so it drains to unknown with its window.
+        self._event_buffer: list[dict[str, Any]] = []
 
         # Persistent stores
         self._store            = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.seen_species")
@@ -157,7 +161,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sci_names_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sci_names")
         self._last_seen_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_seen")
         self._daily_store      = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.daily_counts")
-        self._sticky_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sticky")
+        self._events_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.recent_events")
 
         # In-memory store state
         self._seen_species: dict[str, str] = {}          # species → first_seen ISO
@@ -406,20 +410,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (so today counts before it's a completed day in the store).
         seven_day_rare = self._build_rarest(daily_count, today)
 
-        sticky_dirty = False
-        if detections:
-            if not self._last_detected or detections[0].get("species") != self._last_detected.get("species"):
-                sticky_dirty = True
-            self._last_detected = detections[0]
-
         # Notability: weighted blend of rarity_score (yearly-rank-derived,
         # stable across the day) and recency_score (linear decay over a 24h
         # window). The user controls the blend via a config option; high
-        # weight on rarity → stable list dominated by long-tail species
-        # (close to the historical behaviour); high weight on recency →
-        # dynamic list dominated by what just happened. Computed over the
-        # 24h list (not the 1h subset) so the recency component has real
-        # dynamic range to express.
+        # weight on rarity → stable list dominated by long-tail species; high
+        # weight on recency → dynamic list of what just happened. Computed over
+        # the 24h list (not the 1h subset) so recency has real dynamic range.
+        # notable is deliberately NOT sticky — it drains with its 24h window
+        # (#62), so notable_detection in the data dict is the current top, or
+        # None when the window is empty (box quiet/offline) → sensor "unknown".
         rarity_weight = self.config_entry.options.get(
             CONF_NOTABLE_RARITY_WEIGHT, DEFAULT_NOTABLE_RARITY_WEIGHT
         ) / 100.0
@@ -432,66 +431,22 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         notable = sorted(
             daily_count, key=lambda x: x.get("notability_score", 0), reverse=True
         )
-        if notable:
-            if not self._last_notable or notable[0].get("species") != self._last_notable.get("species"):
-                sticky_dirty = True
-            self._last_notable = notable[0]
 
-        if sticky_dirty:
-            await self._sticky_store.async_save(
-                {"last_detected": self._last_detected, "last_notable": self._last_notable}
-            )
-
-        # Sticky-record bootstrap (independent of the _seen_species bootstrap
-        # above). If a sticky sensor is still empty after the recent-window
-        # block — fresh install during a quiet hour, or a restart with no
-        # .sticky store yet — seed it from the 24-hour window we already
-        # have in hand. No extra API call; fires at most once per sticky
-        # sensor over the lifetime of the integration.
-        if (self._last_detected is None or self._last_notable is None) and daily_count:
-            # Cache images on the seeded record(s) so they carry /local/
-            # URLs, matching the 1-hour pipeline above. (No-op for records
-            # already cached during the _seen_species bootstrap.)
-            for d in daily_count:
-                if d.get("sp_code"):
-                    d["image_url"] = await self._images.async_fetch(d["sp_code"])
-            bootstrap_dirty = False
-            if self._last_detected is None:
-                by_recency = sorted(
-                    daily_count, key=lambda x: x.get("last_seen") or "", reverse=True
-                )
-                if by_recency:
-                    self._last_detected = by_recency[0]
-                    bootstrap_dirty = True
-            if self._last_notable is None:
-                by_rarity = sorted(
-                    daily_count, key=lambda x: x.get("rarity_score", 0), reverse=True
-                )
-                if by_rarity:
-                    self._last_notable = by_rarity[0]
-                    bootstrap_dirty = True
-            if bootstrap_dirty:
-                await self._sticky_store.async_save(
-                    {"last_detected": self._last_detected, "last_notable": self._last_notable}
-                )
-
-        # Every list the sensors expose carries a 1-based `rank` reflecting
-        # that sensor's own ordering criterion. Each list is sorted by its
-        # criterion, then _ranked() stamps the position. (yearly_top_species
-        # already carries its rank from the baseline aggregate.)
-
-        # Per-event list for last_detection.detections — distinct from the
-        # per-species `detections` lists every other sensor exposes (same
-        # attribute name; different records-per-x semantic). The 24h raw
-        # payload preserves event-level detail; we surface the N most
-        # recent events here, capped to bound attribute size.
-        recent_events = _build_recent_events(
+        # last_detection is backed by a persisted rolling buffer of recent
+        # EVENTS (per-event, newest-first, capped at LAST_DETECTION_EVENT_LIMIT),
+        # NOT the live feed — so "the last detection" persists across restarts
+        # and outages (#62). Build this poll's events (they still carry their
+        # transient `wav` for the audio fetch below), merge the new ones into the
+        # buffer, and persist when it changes.
+        poll_events = _build_recent_events(
             daily_raw,
             self._baseline_ranks,
             self._baseline_species_count,
             self._images.url_for,
             LAST_DETECTION_EVENT_LIMIT,
         )
+        if self._merge_event_buffer(poll_events):
+            await self._events_store.async_save(self._event_buffer)
 
         # Fire automation events (new_species / unusual_visitor) for this
         # poll's qualifying species, then advance the recent-window baseline.
@@ -511,13 +466,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if full_days > 0:
                 for wav in self._latest_wav_by_species.values():
                     await self._audio.async_fetch(wav)
-                for ev in recent_events:
+                for ev in poll_events:
                     if ev.get("wav"):
                         await self._audio.async_fetch(ev["wav"])
             else:
                 headline = {
-                    (self._last_detected or {}).get("sp_code"),
-                    (self._last_notable or {}).get("sp_code"),
+                    (poll_events[0].get("sp_code") if poll_events else None),
+                    (notable[0].get("sp_code") if notable else None),
                 }
                 for code in headline:
                     wav = self._latest_wav_by_species.get(code)
@@ -547,17 +502,25 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         new_species_window = metrics["new_species_window"]
         days_since_new = metrics["days_since_new"]
 
+        # last_detection's list + head come from the persisted event buffer (not
+        # the live feed), so they never drain on an outage (#62). _buffer_view()
+        # returns copies with fresh /local images + current rarity/links, leaving
+        # the stored buffer untouched. notable stays live — its list + head drain
+        # to [] / None with the 24h window.
+        recent_events_out = _ranked(self._with_links(self._buffer_view()))
+        notable_out = _ranked(self._with_links(notable))
+
         return {
             # key == sensor id; the public list attribute is always
-            # `detections`. Singular keys are sticky single records;
-            # plural keys are ranked lists. The lists are per-species in
-            # every case EXCEPT last_detection.detections (= recent_events
-            # below), which is per-event — same field shape, but the same
-            # species can appear multiple times.
-            "recent_detections": _ranked(self._with_links(detections)),  # by recency
-            "last_detection": self._last_detected,           # sticky
-            "recent_events": _ranked(self._with_links(recent_events)),  # per-event by dt desc
-            "notable_detection": self._last_notable,         # sticky
+            # `detections`. Singular keys are a single record (or None); plural
+            # keys are ranked lists. last_detection's record + list come from the
+            # persisted event buffer (per-event; survives restarts/outages);
+            # notable_detection is the live current top (None when its 24h window
+            # is empty → sensor "unknown"). Other lists are per-species.
+            "recent_detections": _ranked(self._with_links(detections)),  # 1h, by recency (drains)
+            "last_detection": recent_events_out[0] if recent_events_out else None,  # buffer head — persists
+            "recent_events": recent_events_out,              # per-event buffer, newest-first
+            "notable_detection": notable_out[0] if notable_out else None,  # live; None → "unknown"
             # Capped (≤5/species) trailing-24h list from /detections. NOT the
             # daily_count *sensor's* value (that's today_total) — hence the
             # distinct key, to avoid conflating the two. Kept for the
@@ -565,7 +528,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # membership, both of which only need presence, not true counts.
             "detections_24h": daily_count,
             "daily_top_species": _ranked(self._with_links(self._build_today_top(today_species))),  # true counts, today
-            "notable_detections": _ranked(self._with_links(notable)),          # by rarity
+            "notable_detections": notable_out,               # by notability; drains with 24h window
             # Sticky lifetime-history list (N most recently first-seen
             # species, newest first). Derived from _seen_species, not from
             # the current poll's new arrivals — populated on a fresh box
@@ -740,7 +703,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sci_names = await self._sci_names_store.async_load()
         last_seen = await self._last_seen_store.async_load()
         daily     = await self._daily_store.async_load()
-        sticky    = await self._sticky_store.async_load()
+        events    = await self._events_store.async_load()
 
         self._seen_species   = seen      if isinstance(seen, dict)      else {}
         self._sp_codes       = sp_codes  if isinstance(sp_codes, dict)  else {}
@@ -761,16 +724,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._backfill_cursor = None
             self._backfill_misses = 0
 
-        # Rehydrate the sticky records so last_detection / notable_species
-        # show their last value immediately after a restart instead of
-        # "unknown" until the next live detection.
-        if isinstance(sticky, dict):
-            ld = sticky.get("last_detected")
-            ln = sticky.get("last_notable")
-            if isinstance(ld, dict):
-                self._last_detected = ld
-            if isinstance(ln, dict):
-                self._last_notable = ln
+        # Rehydrate the rolling event buffer so last_detection shows its last
+        # value immediately after a restart (and survives an outage) instead of
+        # "unknown" until the next live detection. Keep only well-formed records,
+        # newest-first, capped — a corrupt/hand-edited store can't crash us.
+        if isinstance(events, list):
+            self._event_buffer = [e for e in events if isinstance(e, dict) and e.get("last_seen")]
+            self._event_buffer.sort(key=lambda e: e.get("last_seen") or "", reverse=True)
+            del self._event_buffer[LAST_DETECTION_EVENT_LIMIT:]
 
         # Rebuild the rarity baseline from the persisted daily counts so
         # rarity is available immediately on restart, before the first poll's
@@ -780,10 +741,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._rebuild_baseline(dt_util.now(await self._async_box_tz()).date())
 
         # One-time cleanup of the legacy stores that earlier versions wrote.
-        # The trailing-window baseline supersedes both, so they're orphaned;
-        # async_remove no-ops if a file is already gone. Runs once per session
-        # (this method is gated by _stores_loaded).
-        for legacy in ("yearly", "seven_day"):
+        # The trailing-window baseline supersedes yearly/seven_day, and the
+        # rolling event buffer + live notable replace the sticky store (#62);
+        # all are orphaned now. async_remove no-ops if a file is already gone.
+        # Runs once per session (this method is gated by _stores_loaded).
+        for legacy in ("yearly", "seven_day", "sticky"):
             await Store(
                 self.hass, _STORE_VERSION, f"{DOMAIN}.{self.serial}.{legacy}"
             ).async_remove()
@@ -926,6 +888,39 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._baseline_ranks, self._baseline_species_count, self._baseline_items = (
             _ranks_from_counts(totals)
         )
+
+    def _merge_event_buffer(self, poll_events: list[dict[str, Any]]) -> bool:
+        """Merge this poll's events into the rolling last-N buffer that backs
+        last_detection. De-duped by (sp_code, last_seen), newest-first, capped at
+        LAST_DETECTION_EVENT_LIMIT. The transient `wav` is stripped before
+        storing (it's a ~1h presigned URL — useless once persisted; audio is
+        re-resolved live). Returns whether the buffer changed (→ persist)."""
+        existing = {(e.get("sp_code"), e.get("last_seen")) for e in self._event_buffer}
+        added = False
+        for ev in poll_events:
+            key = (ev.get("sp_code"), ev.get("last_seen"))
+            if ev.get("last_seen") and key not in existing:
+                self._event_buffer.append({k: v for k, v in ev.items() if k != "wav"})
+                existing.add(key)
+                added = True
+        if added:
+            self._event_buffer.sort(key=lambda e: e.get("last_seen") or "", reverse=True)
+            del self._event_buffer[LAST_DETECTION_EVENT_LIMIT:]
+        return added
+
+    def _buffer_view(self) -> list[dict[str, Any]]:
+        """Display copies of the event buffer for last_detection: fresh /local
+        image_url (a species' photo may have been cached after the event was
+        buffered) and current rarity scores, without mutating the stored buffer.
+        _with_links (applied by the caller) then stamps reference links + a live
+        audio_url (None for aged events whose clip is gone)."""
+        view = [dict(e) for e in self._event_buffer]
+        for e in view:
+            img = self._images.url_for(e.get("sp_code"))
+            if img:
+                e["image_url"] = img
+        _apply_rarity_scores(view, self._baseline_ranks, self._baseline_species_count)
+        return view
 
     def _compute_window_metrics(self, today: date) -> dict[str, Any]:
         """Activity-vs-typical and new-species-momentum figures, derived purely

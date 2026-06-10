@@ -7,8 +7,8 @@ All entities are grouped under a single device per Haikubox. Entity IDs are pref
 | Entity | State | Notable attributes |
 |---|---|---|
 | `sensor.recent_detections` | Species count in current 1-hour window | `detections` (one per species, ranked by recency) |
-| `sensor.last_detection` | Most recently heard species | `detections` (one per event — most recent 50 in 24 h, ranked by recency) |
-| `sensor.notable_species` | Most "notable" species in the trailing 24 h | `detections` (ranked by notability — tunable blend of rarity and recency); `rarity_score`, `yearly_rank` |
+| `sensor.last_detection` | Most recently heard species — the last detection regardless of age (persists across restarts/outages) | `detections` (one per event — rolling cache of the most recent 50, newest first; **survives outages**) |
+| `sensor.notable_species` | Most "notable" species observed in the last 24 h (tunable rarity/recency blend); **`unknown` when none observed** | `detections` (ranked by notability — drains with the 24 h window); `rarity_score`, `yearly_rank` |
 | `sensor.new_species` | Most recently first-detected species | `detections` (lifetime history — most recent 50 first-seen, ranked by first-seen recency), `lifetime_species_count` |
 | `sensor.daily_count` | Total detections today (true `/daily-count` volume; resets at the box's local midnight) | — (total counter) |
 | `sensor.daily_top_species` | Number of species today | `detections` (ranked by today's true `/daily-count` count) |
@@ -47,18 +47,18 @@ Every list-bearing sensor exposes its list under a single **`detections`** attri
 | `yearly_top_species` | most detected in the last 12 months | 12-month `count` |
 | `rarest_species` | rarest in last 7 days | `rarity_score` desc |
 
-Any of these can drive the `haikubox-bird-list-card`. `recent_detections` reads the 1-hour subset; `notable_species` reads the full 24-hour window (so its blend has room for the recency component to matter). Both sets of records come straight from the live `/detections` response and carry full metadata immediately. `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` is available as soon as the per-day backfill has fetched the last week (typically the first poll).
+Any of these can drive the `haikubox-bird-list-card`. `recent_detections` reads the 1-hour subset and `notable_species` the full 24-hour window (so its blend has room for the recency component to matter); both come from the live `/detections` response and **drain when the box goes quiet/offline** — that's correct for an explicit window (`notable_species` goes `unknown`). `last_detection` is the exception: it reads a **persisted rolling cache** of the last 50 events, so it keeps showing the last detection through restarts and outages (#62). `daily_top_species` and `yearly_top_species` enrich `scientific_name`/`last_seen`/photos from per-species stores, so on a fresh install those backfill as species pass through detection polls; `rarest_species` is available as soon as the per-day backfill has fetched the last week (typically the first poll).
 
-### Per-species vs. per-event, live vs. sticky
+### Per-species vs. per-event, live vs. cached
 
 The `detections` records on every sensor *except* `last_detection` are **per-species** — `_normalise_detections` collapses multiple events for the same species into one record, with `count` = events-in-window and `last_seen` = most recent event's timestamp.
 
-`last_detection.detections` is **per-event**: one record per individual detection in the trailing 24 h, capped at the 50 most recent. The same species detected multiple times yields multiple records, each with its own `last_seen` (the event's timestamp). The field shape per record is otherwise the same as the per-species lists, so the bird-list card works pointed at either kind. `count` is omitted on per-event records (always 1).
+`last_detection.detections` is **per-event**: one record per individual detection, from a **persisted rolling cache** of the 50 most recent events (newest first) that survives restarts and outages (#62). The same species detected multiple times yields multiple records, each with its own `last_seen` (the event's timestamp). The field shape per record is otherwise the same as the per-species lists, so the bird-list card works pointed at either kind. `count` is omitted on per-event records (always 1).
 
-Most lists are **live** — recomputed every poll from the current detection window, going empty during quiet periods. Two are **sticky**:
+Most lists are **live** — recomputed every poll from the current detection window, going empty during quiet periods (e.g. `notable_species` drains to `unknown` after 24 h of silence). Two **persist** instead:
 
 - `new_species.detections` — N most recently first-seen species across this box's entire history, sorted by `first_seen` desc. Read from the lifetime `seen_species` log, so it stays populated forever after the first species is seen.
-- `last_detection.detections` — N most recent individual events from the trailing 24 h. Per-event semantic, but functionally sticky as long as anything has been detected in the last day.
+- `last_detection.detections` — the 50 most recent individual events, held in a persisted rolling cache (`.storage/haikubox.<serial>.recent_events`). It survives restarts and outages, so "the last detection" is always the last detection regardless of age (#62).
 
 ## Rarity scoring
 
@@ -80,7 +80,7 @@ Changes to the slider take effect immediately — the coordinator refreshes the 
 
 ## Persistent state
 
-`last_detection` and `notable_species` never clear between polls. They survive HA restarts (their last value is persisted to `.storage/` and rehydrated on startup), and on a fresh install they bootstrap from the 24-hour detection window on the first poll so they populate immediately rather than waiting for an active hour.
+`last_detection` never clears: its rolling event cache is persisted to `.storage/` and rehydrated on startup, so it shows the last detection through restarts and outages — "the last detection" is the last detection regardless of age (#62). `notable_species` is deliberately **not** persisted — it's an observation window, so it drains to `unknown` (with the bird-off icon) after 24 h with nothing observed (e.g. the box offline). `new_species` persists via the lifetime first-seen log.
 
 The following data is written to `.storage/` and survives HA restarts:
 
@@ -91,4 +91,4 @@ The following data is written to `.storage/` and survives HA restarts:
 | `haikubox.<serial>.sci_names` | Species → scientific name lookup |
 | `haikubox.<serial>.last_seen` | Species → most recent detection timestamp |
 | `haikubox.<serial>.daily_counts` | Per-day species counts (full box lifetime). The rarity baseline (trailing 12 months) and the 7-day `rarest_species` window are both aggregated from this; built by backfilling `/daily-count` history. |
-| `haikubox.<serial>.sticky` | Last `last_detection` / `notable_species` records |
+| `haikubox.<serial>.recent_events` | Rolling cache of the 50 most recent detection events (backs `last_detection`) |

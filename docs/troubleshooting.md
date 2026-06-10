@@ -22,7 +22,7 @@ Don't be confused by the nearby **"Make Private: Hide this Haikubox on the map"*
 Every poll fetches a 24-hour detection window from the Haikubox API, so most sensors populate on poll 1 if your box has any recent activity. A few have a longer fill horizon — here's what to expect:
 
 - `recent_detections` — populates on the first poll that returns any detections in the last hour. Empty between active hours.
-- `last_detection`, `notable_species`, `new_species` — bootstrap from the 24-hour window on the first poll, so they populate within ~10 minutes of install as long as your box has detected anything in the last 24 hours. (They stay sticky thereafter.)
+- `last_detection`, `notable_species`, `new_species` — populate on the first poll that returns detections in the last 24 hours, so within ~10 minutes of install if your box is active. `last_detection` then persists (rolling event cache, survives restarts/outages) and `new_species` persists (lifetime log); `notable_species` is an observation window and goes `unknown` after 24 h with nothing detected.
 - `daily_top_species`, `daily_count` — populate on the first poll from the full 24-hour API response. The trailing window slides every poll; counts rise and fall as old detections age past 24h and new ones arrive.
 - `yearly_top_species` — the top species over a rolling 12-month window, built from per-day `/daily-count` history. On a fresh install it starts from the first backfilled chunk, then fills in over the next hour or two as the historical backfill walks back (~30 days/poll until the trailing year is covered, then slower for older history — throttled to be kind to the API). Rarity-derived sensors (`notable_species`, `rarest_species`) sharpen as that window fills.
 - `rarest_species` — derived from the same per-day history; its 7-day window is available as soon as the backfill has fetched the last week (typically the first poll, which grabs ~30 days).
@@ -30,12 +30,10 @@ Every poll fetches a 24-hour detection window from the Haikubox API, so most sen
 
 ## `last_detection` / `notable_species` are `unknown`
 
-These sticky sensors clear themselves only when there is genuinely nothing to show. From 0.4.0 onwards the integration:
+These two behave differently on purpose (see #62):
 
-- Bootstraps both sensors from the 24-hour window on the **first poll**, so a fresh install populates within ~10 minutes as long as your box has detected anything in the last 24 hours.
-- Persists their last value to `.storage/haikubox.<serial>.sticky` and rehydrates on startup, so they survive HA restarts.
-
-If they remain `unknown` after a fresh install with these in place, it usually means the box itself has not heard a recognised species recently — check the Haikubox app to confirm.
+- **`last_detection`** persists — it reads a rolling cache of the most recent detection events (`.storage/haikubox.<serial>.recent_events`), rehydrated on startup, so it survives HA restarts *and* box outages. "The last detection" is the last detection regardless of age. It's only `unknown` before the box's very first detection; if it's `unknown` on an established box, check HA logs.
+- **`notable_species`** is deliberately *not* persisted — it means "most notable species observed in the last 24 h", so it correctly drops to `unknown` (with the bird-off icon) when nothing has been detected in 24 h. During a connectivity/hardware outage that's the expected signal — check the Haikubox app to confirm the box is actually hearing birds.
 
 ## Custom cards don't appear in the dashboard editor
 
