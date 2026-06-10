@@ -28,7 +28,11 @@ from .const import (
     CONF_AUDIO_ENABLED,
     CONF_AUDIO_NORM_TARGET,
     CONF_DEVICE_NAME,
+    CONF_NEW_SPECIES_WINDOW_DAYS,
     CONF_NOTABLE_RARITY_WEIGHT,
+    CONF_RARITY_WINDOW_DAYS,
+    CONF_RECENT_WINDOW_HOURS,
+    CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_WATCHED_EXTRA,
     CONF_WATCHED_SPECIES,
@@ -118,12 +122,17 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Polls the Haikubox API and normalises the response for sensors."""
 
     def __init__(self, hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None:
+        # Poll interval is user-tunable (minutes); an options change reloads the
+        # entry, so a new interval takes effect via this fresh coordinator.
+        scan_minutes = entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL // 60
+        )
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             config_entry=entry,
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            update_interval=timedelta(minutes=scan_minutes),
         )
         self.serial = serial = entry.data[CONF_SERIAL]
         self.device_name = entry.data.get(CONF_DEVICE_NAME, "Haikubox")
@@ -267,7 +276,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # used to fetch separately. Derive the recent subset client-side at
         # the raw level so `count` on recent_detections items reflects
         # detections-in-last-hour, not detections-in-last-24h.
-        recent_threshold = datetime.now(timezone.utc) - timedelta(hours=RECENT_WINDOW_HOURS)
+        recent_hours = self.config_entry.options.get(
+            CONF_RECENT_WINDOW_HOURS, RECENT_WINDOW_HOURS
+        )
+        recent_threshold = datetime.now(timezone.utc) - timedelta(hours=recent_hours)
         recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
 
         # Map each species → its most-recent clip URL (a ~1h presigned FLAC).
@@ -808,7 +820,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         from the stored watermark.
         """
         yesterday = today - timedelta(days=1)
-        window_floor = (today - timedelta(days=RARITY_WINDOW_DAYS)).isoformat()
+        rarity_days = self.config_entry.options.get(
+            CONF_RARITY_WINDOW_DAYS, RARITY_WINDOW_DAYS
+        )
+        window_floor = (today - timedelta(days=rarity_days)).isoformat()
         window_covered = self._backfill_complete or (
             bool(self._daily_counts) and min(self._daily_counts) <= window_floor
         )
@@ -900,7 +915,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Aggregate the trailing RARITY_WINDOW_DAYS of daily counts into the
         rarity baseline (species → rank). Replaces the calendar-year fetch;
         cheap enough to run every poll."""
-        cutoff = (today - timedelta(days=RARITY_WINDOW_DAYS)).isoformat()
+        rarity_days = self.config_entry.options.get(
+            CONF_RARITY_WINDOW_DAYS, RARITY_WINDOW_DAYS
+        )
+        cutoff = (today - timedelta(days=rarity_days)).isoformat()
         totals: dict[str, int] = {}
         for date_str, counts in self._daily_counts.items():
             if date_str >= cutoff:  # ISO dates compare lexicographically
@@ -967,7 +985,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         latest_day = max(completed) if completed else None
         latest_day_total = completed[latest_day] if latest_day else None
 
-        new_cutoff = (today - timedelta(days=NEW_SPECIES_WINDOW_DAYS)).isoformat()
+        new_days = self.config_entry.options.get(
+            CONF_NEW_SPECIES_WINDOW_DAYS, NEW_SPECIES_WINDOW_DAYS
+        )
+        new_cutoff = (today - timedelta(days=new_days)).isoformat()
         first_seen_dates = [fs[:10] for fs in self._seen_species.values() if fs]
         new_species_window = sum(1 for fs in first_seen_dates if fs >= new_cutoff)
         days_since_new: int | None = None

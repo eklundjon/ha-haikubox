@@ -34,7 +34,11 @@ from .const import (
     CONF_AUDIO_ENABLED,
     CONF_AUDIO_NORM_TARGET,
     CONF_DEVICE_NAME,
+    CONF_NEW_SPECIES_WINDOW_DAYS,
     CONF_NOTABLE_RARITY_WEIGHT,
+    CONF_RARITY_WINDOW_DAYS,
+    CONF_RECENT_WINDOW_HOURS,
+    CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONF_WATCHED_EXTRA,
     CONF_WATCHED_SPECIES,
@@ -43,7 +47,11 @@ from .const import (
     DEFAULT_AUDIO_ENABLED,
     DEFAULT_AUDIO_NORM_TARGET,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    NEW_SPECIES_WINDOW_DAYS,
+    RARITY_WINDOW_DAYS,
+    RECENT_WINDOW_HOURS,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -146,6 +154,7 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
 # their fields are flattened back into flat options on save.
 SECTION_WATCHED = "watched"
 SECTION_AUDIO = "audio"
+SECTION_ADVANCED = "advanced"
 
 
 class HaikuboxOptionsFlow(OptionsFlow):
@@ -168,10 +177,11 @@ class HaikuboxOptionsFlow(OptionsFlow):
             data = {
                 k: v
                 for k, v in user_input.items()
-                if k not in (SECTION_WATCHED, SECTION_AUDIO)
+                if k not in (SECTION_WATCHED, SECTION_AUDIO, SECTION_ADVANCED)
             }
             data.update(user_input.get(SECTION_WATCHED, {}))
             data.update(user_input.get(SECTION_AUDIO, {}))
+            data.update(user_input.get(SECTION_ADVANCED, {}))
             return self.async_create_entry(title="", data=data)
 
         opts = self.config_entry.options
@@ -182,6 +192,12 @@ class HaikuboxOptionsFlow(OptionsFlow):
         current_audio_on = opts.get(CONF_AUDIO_ENABLED, DEFAULT_AUDIO_ENABLED)
         current_audio_days = opts.get(CONF_AUDIO_CACHE_DAYS, DEFAULT_AUDIO_CACHE_DAYS)
         current_audio_norm = opts.get(CONF_AUDIO_NORM_TARGET, DEFAULT_AUDIO_NORM_TARGET)
+        current_recent = opts.get(CONF_RECENT_WINDOW_HOURS, RECENT_WINDOW_HOURS)
+        current_scan = opts.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL // 60)
+        current_rarity = opts.get(CONF_RARITY_WINDOW_DAYS, RARITY_WINDOW_DAYS)
+        current_new_window = opts.get(
+            CONF_NEW_SPECIES_WINDOW_DAYS, NEW_SPECIES_WINDOW_DAYS
+        )
 
         # Watch-list picker: union of species the box has detected with any
         # already-saved selections (so a saved name that's since dropped off the
@@ -277,6 +293,61 @@ class HaikuboxOptionsFlow(OptionsFlow):
                             }
                         ),
                         {"collapsed": not current_audio_on},
+                    ),
+                    vol.Required(SECTION_ADVANCED): section(
+                        vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_RECENT_WINDOW_HOURS,
+                                    default=current_recent,
+                                ): NumberSelector(
+                                    NumberSelectorConfig(
+                                        min=1,
+                                        max=24,
+                                        step=1,
+                                        mode=NumberSelectorMode.BOX,
+                                        unit_of_measurement="hours",
+                                    )
+                                ),
+                                vol.Required(
+                                    CONF_SCAN_INTERVAL,
+                                    default=current_scan,
+                                ): NumberSelector(
+                                    NumberSelectorConfig(
+                                        min=5,
+                                        max=60,
+                                        step=1,
+                                        mode=NumberSelectorMode.BOX,
+                                        unit_of_measurement="min",
+                                    )
+                                ),
+                                vol.Required(
+                                    CONF_RARITY_WINDOW_DAYS,
+                                    default=current_rarity,
+                                ): NumberSelector(
+                                    NumberSelectorConfig(
+                                        min=30,
+                                        max=730,
+                                        step=5,
+                                        mode=NumberSelectorMode.BOX,
+                                        unit_of_measurement="days",
+                                    )
+                                ),
+                                vol.Required(
+                                    CONF_NEW_SPECIES_WINDOW_DAYS,
+                                    default=current_new_window,
+                                ): NumberSelector(
+                                    NumberSelectorConfig(
+                                        min=7,
+                                        max=365,
+                                        step=1,
+                                        mode=NumberSelectorMode.BOX,
+                                        unit_of_measurement="days",
+                                    )
+                                ),
+                            }
+                        ),
+                        {"collapsed": True},
                     ),
                 }
             ),
