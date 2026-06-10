@@ -72,10 +72,17 @@ Event data:
 | `scientific_name` | Scientific name. |
 | `sp_code` | eBird species code. |
 | `image_url` | Photo URL for the species (may be absent). |
+| `audio_url` | Local `/local/...` URL of the species' cached call recording, or `null` when audio is disabled or no clip is cached. Reachable only from inside your HA network (use it as a notification audio attachment). |
 | `last_seen` | Timestamp of this detection. |
+| `count` | Times this species was heard in the recent (1-hour) window. |
+| `ebird_url` | eBird species page. |
+| `wikipedia_url` | Wikipedia article. |
+| `allaboutbirds_url` | All About Birds species guide. |
+| `macaulay_url` | Macaulay Library media page. |
 | `rarity_score` | Rarity vs. the box's rolling 12-month baseline. |
 | `yearly_rank` | Rank within the rolling 12-month rarity baseline (1 = most common). The field name predates the rolling baseline and is kept for compatibility. |
 | `days_absent` | **`unusual_visitor` only** — days since the previous sighting. |
+| `lifetime_species_count` | **`new_species` only** — total distinct species ever detected on this box, including this one (e.g. "your 87th species"). |
 
 In templates these are reached via `trigger.event.data.<field>` (for example
 `{{ trigger.event.data.species }}`).

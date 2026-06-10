@@ -580,7 +580,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # install (the bootstrap pre-seeds _seen_species, so newly_seen is
         # empty); on established installs these are real first-ever records.
         for sp in newly_seen:
-            self._fire_event(TRIGGER_NEW_SPECIES, by_species[sp])
+            self._fire_event(
+                TRIGGER_NEW_SPECIES,
+                by_species[sp],
+                lifetime_species_count=len(self._seen_species),
+            )
 
         # unusual_visitor — a known species reappearing after a long absence.
         # Skipped on the first poll of the session (no baseline yet) so a
@@ -669,12 +673,24 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _fire_event(
         self, trigger_type: str, record: dict[str, Any], **extra: Any
     ) -> None:
-        """Assemble and fire one haikubox_event for a species record."""
+        """Assemble and fire one haikubox_event for a species record.
+
+        Beyond the core fields the payload carries the per-record `count`, the
+        reference-link URLs (templated — so automations can deep-link), and a
+        local `audio_url` for the species' cached call clip when audio is enabled
+        and a clip is cached (else None). Callers may add per-trigger `extra`
+        (e.g. `days_absent` for unusual_visitor, `lifetime_species_count` for
+        new_species).
+        """
         device = dr.async_get(self.hass).async_get_device(
             identifiers={(DOMAIN, self.serial)}
         )
         if device is None:
             return  # device not in the registry yet (only on first-ever setup)
+        sp_code = record.get("sp_code", "")
+        # Resolve the species' most-recent cached clip to a stable /local URL
+        # (None when audio is off or the clip isn't cached). Pure in-memory lookup.
+        wav = self._latest_wav_by_species.get(sp_code) if self._audio_enabled else None
         self.hass.bus.async_fire(
             EVENT_HAIKUBOX,
             {
@@ -684,11 +700,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "type": trigger_type,
                 "species": record.get("species"),
                 "scientific_name": record.get("scientific_name"),
-                "sp_code": record.get("sp_code"),
+                "sp_code": sp_code,
                 "image_url": record.get("image_url"),
+                "audio_url": self._audio.url_for(wav) if (wav and self._audio) else None,
                 "last_seen": record.get("last_seen"),
+                "count": record.get("count"),
                 "rarity_score": record.get("rarity_score"),
                 "yearly_rank": record.get("yearly_rank"),
+                **self._links_for(
+                    record.get("species", ""), sp_code, record.get("scientific_name", "")
+                ),
                 **extra,
             },
         )
