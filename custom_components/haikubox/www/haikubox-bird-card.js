@@ -608,10 +608,12 @@ class HaikuboxBirdCard extends HTMLElement {
         }
 
         /*
-         * Portrait layout — three priorities when vertical space is tight:
-         *  1. Crop the photo (fill full width, but no wider than 3:2 aspect ratio)
-         *  2. Drop the scientific name   [portrait B query below]
-         *  3. Shrink the photo to 3:2, centre horizontally  [portrait C query below]
+         * Portrait layout — priorities when vertical space is tight. The photo
+         * is always FULL WIDTH (a contained image over an edge-to-edge blur
+         * fill), so the fill reaches both side edges in every case:
+         *  1. Photo height = card width (square), capped to leave a text area
+         *  2. Drop the scientific name         [portrait B query below]
+         *  3. Reduce the photo height for text  [portrait C query below]
          */
         .img-wrap {
           flex: 0 0 auto;
@@ -709,17 +711,19 @@ class HaikuboxBirdCard extends HTMLElement {
         }
 
         /*
-         * Portrait priority 3: card is too short for full-width 3:2 photo + text.
-         * Shrink photo to 3:2, centre horizontally. Here the scientific name is
-         * already hidden (priority 2), so the body is up to three lines (species,
-         * time, confidence); reserve clamps 86–160px to fit them without the
-         * species name riding up under the photo.
+         * Portrait priority 3: card is too short for a full-height photo + text.
+         * Reduce the photo HEIGHT to free text space — but keep it FULL WIDTH so
+         * the blur-fill still reaches the card's side edges (the contained image
+         * just letterboxes within). (It used to shrink to a centered 3:2 box, a
+         * leftover from the object-fit:cover era, which left bare card showing
+         * at the sides.) The scientific name is already hidden (priority 2), so
+         * the body is up to three lines (species, time, confidence); reserve
+         * clamps 86–160px to fit them without the name riding up under the photo.
          */
         @container (min-aspect-ratio: 1.2) and (max-aspect-ratio: 3/2) {
           .img-wrap {
-            flex: 0 0 auto;
             height: calc(100cqh - clamp(86px, 30cqh, 160px));
-            width: min(100cqw, calc((100cqh - clamp(86px, 30cqh, 160px)) * 1.5));
+            width: 100%;
           }
         }
 
