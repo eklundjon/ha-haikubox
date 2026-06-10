@@ -22,15 +22,18 @@ described below.
 
 ## Blueprints (push notification in two clicks)
 
-Two blueprints wrap the triggers above into a mobile notification, including
-the bird's photo when one is available:
+Three blueprints — one per device trigger — wrap the triggers above into a
+mobile notification, including the bird's photo when one is available:
 
-- **Haikubox — New species notification**
-- **Haikubox — Unusual visitor notification**
+- **Haikubox — New species notification** (`new_species`)
+- **Haikubox — Unusual visitor notification** (`unusual_visitor`)
+- **Haikubox — Watched species notification** (`watched_species`)
 
 Each asks for two things: which **Haikubox** to watch and which **mobile-app
 device** to notify. The notification title and message are editable, with
-sensible defaults.
+sensible defaults. (The watched-species one alerts on the species you've chosen
+in the integration's options — see [Watched species](sensors.md) for setting the
+watch-list.)
 
 ### Importing a blueprint
 
@@ -40,6 +43,7 @@ Import blueprint** and paste the raw URL:
 ```
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/new_species_notification.yaml
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/unusual_visitor_notification.yaml
+https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/watched_species_notification.yaml
 ```
 
 Then **Settings → Automations & scenes → Create automation → Use blueprint**,

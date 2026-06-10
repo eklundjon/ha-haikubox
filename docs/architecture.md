@@ -280,7 +280,7 @@ filtered to `haikubox_event` with matching `device_id` + `type` — so the devic
 picker entry is a thin, well-supported wrapper over the bus event rather than a
 bespoke listener.
 
-The two notification **blueprints** live in `blueprints/automation/haikubox/`
+The three notification **blueprints** (one per device trigger) live in `blueprints/automation/haikubox/`
 at the repo root (not under `custom_components/`). Custom integrations can't
 auto-install blueprints into a user's config, so they're distributed by import
 URL — see [docs/automations.md](automations.md).
