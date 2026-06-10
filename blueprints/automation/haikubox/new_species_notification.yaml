@@ -4,7 +4,9 @@ blueprint:
     Send a mobile push notification (with the bird's photo) the first time
     your Haikubox ever hears a given species. Fires off the integration's
     `new_species` device trigger, so it only alerts on genuine lifetime
-    firsts — not on a fresh install bootstrapping its history.
+    firsts — not on a fresh install bootstrapping its history. The notification
+    includes the running lifetime species count and tap-through buttons to the
+    bird's eBird and Wikipedia pages.
   domain: automation
   source_url: https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/new_species_notification.yaml
   author: ha-haikubox
@@ -32,9 +34,10 @@ blueprint:
     notification_message:
       name: Notification message
       description: >
-        Body of the push notification. The bird's common name is available as
-        {{ species }} and the box name as {{ device_name }}.
-      default: "First-ever detection of {{ species }} at {{ device_name }}."
+        Body of the push notification. Available: {{ species }} (common name),
+        {{ device_name }} (the box), and {{ lifetime_species_count }} (total
+        distinct species ever heard here, including this one).
+      default: "First-ever detection of {{ species }} at {{ device_name }} — species #{{ lifetime_species_count }} on this box! 🎉"
 
 triggers:
   - trigger: device
@@ -47,6 +50,9 @@ variables:
   scientific_name: "{{ trigger.event.data.scientific_name }}"
   device_name: "{{ trigger.event.data.device_name }}"
   image_url: "{{ trigger.event.data.image_url }}"
+  ebird_url: "{{ trigger.event.data.ebird_url }}"
+  wikipedia_url: "{{ trigger.event.data.wikipedia_url }}"
+  lifetime_species_count: "{{ trigger.event.data.lifetime_species_count }}"
 
 actions:
   - alias: Send the new-species notification
@@ -55,5 +61,11 @@ actions:
     device_id: !input notify_device
     title: !input notification_title
     message: !input notification_message
+    # The bird's photo (when available) plus tap-through action buttons to
+    # eBird / Wikipedia, built from the event's reference-link fields.
     data: >
-      {{ {'image': image_url, 'attachment': {'url': image_url}} if image_url else {} }}
+      {% set actions = [] %}
+      {% if ebird_url %}{% set actions = actions + [{'action': 'URI', 'title': 'Open in eBird', 'uri': ebird_url}] %}{% endif %}
+      {% if wikipedia_url %}{% set actions = actions + [{'action': 'URI', 'title': 'Wikipedia', 'uri': wikipedia_url}] %}{% endif %}
+      {{ {'image': image_url, 'attachment': {'url': image_url}, 'actions': actions}
+         if image_url else {'actions': actions} }}

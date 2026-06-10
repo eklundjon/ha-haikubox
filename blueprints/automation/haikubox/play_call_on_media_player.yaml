@@ -1,0 +1,67 @@
+blueprint:
+  name: Haikubox — Play the call on a media player
+  description: >
+    When a chosen Haikubox event fires, play that detection's cached call
+    recording on a media player (a speaker, display, etc.). Demonstrates the
+    event's `audio_url` field — the local URL of the cached clip. Requires audio
+    to be enabled in the integration's options (and a clip to be cached for the
+    detection); the chosen media player must be able to reach your Home
+    Assistant `/local/...` URL and play FLAC. If no recording is available the
+    automation does nothing.
+  domain: automation
+  source_url: https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/play_call_on_media_player.yaml
+  author: ha-haikubox
+  input:
+    haikubox_device:
+      name: Haikubox
+      description: The Haikubox whose detections should play.
+      selector:
+        device:
+          filter:
+            integration: haikubox
+    event_type:
+      name: Trigger on
+      description: >
+        Which Haikubox detection event should play the call. The same
+        `audio_url` field is on every event, so any of these works.
+      default: watched_species
+      selector:
+        select:
+          options:
+            - label: New species
+              value: new_species
+            - label: Unusual visitor
+              value: unusual_visitor
+            - label: Watched species
+              value: watched_species
+    media_player:
+      name: Media player
+      description: Where to play the recording (a speaker, display, etc.).
+      selector:
+        entity:
+          filter:
+            domain: media_player
+
+triggers:
+  - trigger: device
+    domain: haikubox
+    device_id: !input haikubox_device
+    type: !input event_type
+
+variables:
+  audio_url: "{{ trigger.event.data.audio_url }}"
+
+conditions:
+  # Only proceed when the detection actually has a cached clip (audio enabled +
+  # clip cached). audio_url is null/"None"/"" otherwise.
+  - condition: template
+    value_template: "{{ audio_url not in [none, '', 'None'] }}"
+
+actions:
+  - alias: Play the detection's call on the chosen media player
+    action: media_player.play_media
+    target:
+      entity_id: !input media_player
+    data:
+      media_content_id: "{{ audio_url }}"
+      media_content_type: music
