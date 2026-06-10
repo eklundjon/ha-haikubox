@@ -280,8 +280,11 @@ filtered to `haikubox_event` with matching `device_id` + `type` — so the devic
 picker entry is a thin, well-supported wrapper over the bus event rather than a
 bespoke listener.
 
-The three notification **blueprints** (one per device trigger) live in `blueprints/automation/haikubox/`
-at the repo root (not under `custom_components/`). Custom integrations can't
+The four **blueprints** (three per-trigger notifications + a media-player "play
+the call") live in `blueprints/automation/haikubox/` at the repo root (not under
+`custom_components/`). They double as worked examples of the `haikubox_event`
+payload fields (photo, reference-link buttons, `lifetime_species_count`,
+`audio_url`), which are common to every event. Custom integrations can't
 auto-install blueprints into a user's config, so they're distributed by import
 URL — see [docs/automations.md](automations.md).
 

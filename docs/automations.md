@@ -22,18 +22,38 @@ described below.
 
 ## Blueprints (push notification in two clicks)
 
-Three blueprints — one per device trigger — wrap the triggers above into a
-mobile notification, including the bird's photo when one is available:
+Four blueprints ship as starting points — three mobile notifications (one per
+device trigger) plus a media-player one:
 
-- **Haikubox — New species notification** (`new_species`)
-- **Haikubox — Unusual visitor notification** (`unusual_visitor`)
-- **Haikubox — Watched species notification** (`watched_species`)
+- **Haikubox — New species notification** (`new_species`) — push with the
+  bird's photo, the running lifetime species count, and tap-through **action
+  buttons** to eBird and Wikipedia.
+- **Haikubox — Unusual visitor notification** (`unusual_visitor`) — push that
+  **attaches the call recording** (so you can play it) when one is cached,
+  falling back to the photo otherwise.
+- **Haikubox — Watched species notification** (`watched_species`) — push with
+  the bird's photo for the species you've chosen in the integration's options
+  (see [Watched species](sensors.md) for the watch-list).
+- **Haikubox — Play the call on a media player** — plays the detection's cached
+  recording on a speaker/display; its trigger type is selectable.
 
-Each asks for two things: which **Haikubox** to watch and which **mobile-app
-device** to notify. The notification title and message are editable, with
-sensible defaults. (The watched-species one alerts on the species you've chosen
-in the integration's options — see [Watched species](sensors.md) for setting the
-watch-list.)
+Each asks which **Haikubox** to watch and either a **mobile-app device** to
+notify or a **media player** to play on; titles/messages are editable.
+
+These deliberately show off **different event features** — photo, action
+buttons (`ebird_url`/`wikipedia_url`), `lifetime_species_count`, audio
+attachment and media playback (`audio_url`). None of those are tied to a
+particular trigger: **every `haikubox_event` carries the same fields** (see the
+table below), so you can mix and match — e.g. add eBird buttons to the
+unusual-visitor push, or play the call on a new species. Use the shipped
+blueprints as recipes and copy the bits you want.
+
+> **Audio caveats.** `audio_url` is a `/local/...` URL, so it only resolves from
+> inside your HA network, and the clips are **FLAC** — which iOS notification
+> attachments may not play, and some media players don't support. It works best
+> for an in-network media player that handles FLAC. (Audio must also be enabled
+> in the integration options and a clip cached for that detection, or
+> `audio_url` is `null`.)
 
 ### Importing a blueprint
 
@@ -44,6 +64,7 @@ Import blueprint** and paste the raw URL:
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/new_species_notification.yaml
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/unusual_visitor_notification.yaml
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/watched_species_notification.yaml
+https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/play_call_on_media_player.yaml
 ```
 
 Then **Settings → Automations & scenes → Create automation → Use blueprint**,
