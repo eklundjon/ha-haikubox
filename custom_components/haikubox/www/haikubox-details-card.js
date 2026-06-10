@@ -316,7 +316,9 @@ class HaikuboxBirdListCard extends HTMLElement {
 
   setConfig(config) {
     if (config.entity === undefined) throw new Error("'entity' is required");
-    this._config = { top: 10, row_size: "small", ...config };
+    // `position` (1-based) + `detail_only` drive the single-bird detail popup
+    // the bird card opens; ignored in normal list mode.
+    this._config = { top: 10, row_size: "small", position: 1, ...config };
   }
 
   set hass(hass) {
@@ -506,6 +508,57 @@ class HaikuboxBirdListCard extends HTMLElement {
     return `${Math.floor(diff / 86400)}d ago`;
   }
 
+  // One list row: a compact view + a detail view; `.is-open` swaps which shows
+  // (CSS hides `.compact` when open). Shared by the ranked list and the
+  // single-bird detail_only popup (which renders just this row, force-open).
+  _itemHtml(item, i) {
+    const open = item.species === this._openSpecies;
+    const t = this._relativeTime(item.last_seen);
+    return `
+                <div class="item${open ? " is-open" : ""}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open ? "true" : "false"}">
+                  <div class="compact">
+                    ${item.image_url
+                      ? `<img class="thumb" src="${_esc(item.image_url)}" alt="${_esc(item.species)}" loading="lazy">`
+                      : `<div class="thumb-placeholder">🐦</div>`}
+                    <div class="rank">${_esc(this._rank(item, i))}</div>
+                    <div class="info">
+                      <div class="name">${_esc(item.species)}</div>
+                      ${item.scientific_name ? `<div class="sub">${_esc(item.scientific_name)}</div>` : ""}
+                    </div>
+                    ${this._linksBlock(item, { ebird: this._config.show_ebird, aab: this._config.show_allaboutbirds, ml: this._config.show_macaulay }, "row-links")}
+                  </div>
+                  <div class="detail">
+                    ${item.image_url
+                      ? `<img class="detail-photo" src="${_esc(item.image_url)}" alt="${_esc(item.species)}" loading="lazy">`
+                      : `<div class="detail-photo-placeholder">🐦</div>`}
+                    <div class="detail-text">
+                      <div class="detail-name">${_esc(item.species)}</div>
+                      ${item.scientific_name ? `<div class="detail-sci">${_esc(item.scientific_name)}</div>` : ""}
+                      ${this._config.show_description !== false && item.wikipedia_url
+                        ? `<a class="detail-desc" href="${_esc(item.wikipedia_url)}" target="_blank" rel="noreferrer noopener" title="Read more on Wikipedia"><span class="detail-desc-text" data-species="${_esc(item.species)}">${_esc(this._descCache?.get(item.species) ?? "")}</span></a>`
+                        : ""}
+                      <div class="metrics">
+                        ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
+                        ${t ? `<div class="metric">last heard <strong data-last-seen="${_esc(item.last_seen)}">${_esc(t)}</strong></div>` : ""}
+                        ${this._config.show_confidence !== false && item.confidence_band
+                          ? `<div class="metric conf-${_esc(item.confidence_band)}" title="Detection confidence"><span class="conf-dot"></span><strong>${_esc(_bandLabel(item.confidence_band))}</strong> confidence</div>`
+                          : ""}
+                        ${item.alpha ? `<div class="metric" title="Alpha banding code"><strong>${_esc(item.alpha)}</strong></div>` : ""}
+                      </div>
+                      ${this._config.show_activity !== false && Array.isArray(item.hourly) && item.hourly.some((v) => v > 0)
+                        ? `<div class="detail-activity" title="Hourly activity (last 7 days)"><span class="spark">${_sparkline(item.hourly)}</span><span class="peak">most active ~${_peakHourLabel(item.hourly)}</span></div>`
+                        : ""}
+                      ${this._config.show_audio !== false && item.audio_url
+                        ? `<button class="play-call" type="button" data-audio="${_esc(item.audio_url)}" data-species="${_esc(item.species)}" aria-label="Play recording of ${_esc(item.species)}"><span class="play-icon">▶</span><span class="play-label">Play call</span></button>`
+                        : ""}
+                      ${this._linksBlock(item, { ebird: true, aab: true, ml: true }, "detail-links")}
+                      ${this._attributionBlock(item)}
+                    </div>
+                  </div>
+                </div>
+              `;
+  }
+
   _render() {
     // Defensive: HA's card lifecycle is normally setConfig → set hass
     // (which calls _render), but during a reload or first-mount edge
@@ -514,15 +567,30 @@ class HaikuboxBirdListCard extends HTMLElement {
     if (!this._config) return;
     const stateObj = this._hass?.states[this._config.entity];
     const attrs = stateObj?.attributes ?? {};
-    const items = (attrs.detections ?? []).slice(0, this._config.top);
+    // detail_only mode: render just the position-th bird's detail view (the
+    // expanded-row template, compact row hidden by CSS) — the bird card's
+    // "details" popup. Otherwise the normal ranked list, sliced to `top`.
+    const detailOnly = !!this._config.detail_only;
+    let items;
+    if (detailOnly) {
+      const all = attrs.detections ?? [];
+      const pos = Math.min(Math.max(1, this._config.position || 1), Math.max(all.length, 1));
+      items = all[pos - 1] ? [all[pos - 1]] : [];
+      this._openSpecies = items[0] ? items[0].species : null;  // force-expanded
+    } else {
+      items = (attrs.detections ?? []).slice(0, this._config.top);
+    }
     this._items = items;  // referenced by the row toggle handler
     // Fall back to the entity's friendly name when no title is set.
     // The stub config and editor write title:"" (not nullish), so a
     // plain `??` chain never reached the fallback for UI-created cards.
+    // detail_only has no header — the detail view carries the species name.
     const configured = this._config.title;
-    const title = (configured && configured.trim())
-      ? configured
-      : (attrs.friendly_name ?? "");
+    const title = detailOnly
+      ? ""
+      : (configured && configured.trim())
+        ? configured
+        : (attrs.friendly_name ?? "");
 
     // Row density → class on .list. Default (small) needs no class.
     const size = this._config.row_size;
@@ -591,6 +659,20 @@ class HaikuboxBirdListCard extends HTMLElement {
           padding: 6px 16px;
         }
         .item.is-open .compact { display: none; }
+        /* detail_only popup: the single row is already expanded and not
+           interactive, so drop the pointer affordance. Also size to content
+           rather than filling a fixed-height ancestor — the list mode's
+           height:100% / flex:1 chain collapses to 0 in a content-sized popup. */
+        .list.detail-only .item { cursor: default; }
+        ha-card.detail-only,
+        ha-card.detail-only .layout { height: auto; }
+        .list.detail-only { flex: none; overflow-y: visible; }
+        /* In the (roomy) detail popup, let the photo scale up with the card
+           width instead of the list's 220px cap. */
+        .list.detail-only .item.is-open .detail-photo,
+        .list.detail-only .item.is-open .detail-photo-placeholder {
+          width: clamp(200px, 40cqw, 420px);
+        }
 
         .thumb,
         .thumb-placeholder {
@@ -876,81 +958,39 @@ class HaikuboxBirdListCard extends HTMLElement {
           color: var(--disabled-text-color);
         }
       </style>
-      <ha-card>
-        <div class="layout">
+      <ha-card class="${detailOnly ? "detail-only" : ""}">
+        <div class="layout${detailOnly ? " detail-only" : ""}">
         ${title ? `<div class="card-header">${_esc(title)}</div>` : ""}
-        <div class="list${sizeClass}">
+        <div class="list${sizeClass}${detailOnly ? " detail-only" : ""}">
           ${items.length === 0
             ? `<div class="empty">No data yet</div>`
-            : items.map((item, i) => {
-                const open = item.species === this._openSpecies;
-                const t = this._relativeTime(item.last_seen);
-                return `
-                <div class="item${open ? " is-open" : ""}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open ? "true" : "false"}">
-                  <div class="compact">
-                    ${item.image_url
-                      ? `<img class="thumb" src="${_esc(item.image_url)}" alt="${_esc(item.species)}" loading="lazy">`
-                      : `<div class="thumb-placeholder">🐦</div>`}
-                    <div class="rank">${_esc(this._rank(item, i))}</div>
-                    <div class="info">
-                      <div class="name">${_esc(item.species)}</div>
-                      ${item.scientific_name ? `<div class="sub">${_esc(item.scientific_name)}</div>` : ""}
-                    </div>
-                    ${this._linksBlock(item, { ebird: this._config.show_ebird, aab: this._config.show_allaboutbirds, ml: this._config.show_macaulay }, "row-links")}
-                  </div>
-                  <div class="detail">
-                    ${item.image_url
-                      ? `<img class="detail-photo" src="${_esc(item.image_url)}" alt="${_esc(item.species)}" loading="lazy">`
-                      : `<div class="detail-photo-placeholder">🐦</div>`}
-                    <div class="detail-text">
-                      <div class="detail-name">${_esc(item.species)}</div>
-                      ${item.scientific_name ? `<div class="detail-sci">${_esc(item.scientific_name)}</div>` : ""}
-                      ${this._config.show_description !== false && item.wikipedia_url
-                        ? `<a class="detail-desc" href="${_esc(item.wikipedia_url)}" target="_blank" rel="noreferrer noopener" title="Read more on Wikipedia"><span class="detail-desc-text" data-species="${_esc(item.species)}">${_esc(this._descCache?.get(item.species) ?? "")}</span></a>`
-                        : ""}
-                      <div class="metrics">
-                        ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
-                        ${t ? `<div class="metric">last heard <strong data-last-seen="${_esc(item.last_seen)}">${_esc(t)}</strong></div>` : ""}
-                        ${this._config.show_confidence !== false && item.confidence_band
-                          ? `<div class="metric conf-${_esc(item.confidence_band)}" title="Detection confidence"><span class="conf-dot"></span><strong>${_esc(_bandLabel(item.confidence_band))}</strong> confidence</div>`
-                          : ""}
-                        ${item.alpha ? `<div class="metric" title="Alpha banding code"><strong>${_esc(item.alpha)}</strong></div>` : ""}
-                      </div>
-                      ${this._config.show_activity !== false && Array.isArray(item.hourly) && item.hourly.some((v) => v > 0)
-                        ? `<div class="detail-activity" title="Hourly activity (last 7 days)"><span class="spark">${_sparkline(item.hourly)}</span><span class="peak">most active ~${_peakHourLabel(item.hourly)}</span></div>`
-                        : ""}
-                      ${this._config.show_audio !== false && item.audio_url
-                        ? `<button class="play-call" type="button" data-audio="${_esc(item.audio_url)}" data-species="${_esc(item.species)}" aria-label="Play recording of ${_esc(item.species)}"><span class="play-icon">▶</span><span class="play-label">Play call</span></button>`
-                        : ""}
-                      ${this._linksBlock(item, { ebird: true, aab: true, ml: true }, "detail-links")}
-                      ${this._attributionBlock(item)}
-                    </div>
-                  </div>
-                </div>
-              `;
-              }).join("")}
+            : items.map((item, i) => this._itemHtml(item, i)).join("")}
         </div>
         </div>
       </ha-card>
     `;
 
     const list = this.shadowRoot.querySelector(".list");
-    list.addEventListener("click", (e) => {
-      // A link or the play-call button lives inside the item; let it act
-      // without also toggling the detail view.
-      if (e.target.closest("a, .play-call")) return;
-      const item = e.target.closest(".item");
-      if (item) this._toggleItem(item);
-    });
-    list.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      // Enter/Space on a focused link or play button acts on it, not the row.
-      if (e.target.closest("a, .play-call")) return;
-      const item = e.target.closest(".item");
-      if (!item) return;
-      e.preventDefault();  // Space would otherwise scroll the list
-      this._toggleItem(item);
-    });
+    // Row tap-to-expand only in list mode; detail_only is already expanded and
+    // has nothing to collapse to, so tapping it should do nothing.
+    if (!detailOnly) {
+      list.addEventListener("click", (e) => {
+        // A link or the play-call button lives inside the item; let it act
+        // without also toggling the detail view.
+        if (e.target.closest("a, .play-call")) return;
+        const item = e.target.closest(".item");
+        if (item) this._toggleItem(item);
+      });
+      list.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        // Enter/Space on a focused link or play button acts on it, not the row.
+        if (e.target.closest("a, .play-call")) return;
+        const item = e.target.closest(".item");
+        if (!item) return;
+        e.preventDefault();  // Space would otherwise scroll the list
+        this._toggleItem(item);
+      });
+    }
 
     // "Play the call": play the detection's soundscape in-browser. stopPropagation
     // keeps the row from toggling; one Audio instance, play/pause toggling.

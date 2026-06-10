@@ -66,6 +66,7 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       if (this._attrField) this._attrField.value = config.show_attribution !== false;
       if (this._confField) this._confField.value = config.show_confidence !== false;
       if (this._audioField) this._audioField.value = config.show_audio !== false;
+      if (this._detailsField) this._detailsField.value = config.show_details !== false;
     }
   }
 
@@ -258,6 +259,20 @@ class HaikuboxBirdCardEditor extends HTMLElement {
       );
       this._audioField = audio;
       this.appendChild(audio);
+
+      // "Details" button toggle (default on). Adds an ⓘ button over the photo
+      // that opens this bird's full detail view in a popup.
+      const details = document.createElement("ha-selector");
+      details.label = "Show details button";
+      details.selector = { boolean: {} };
+      if (this._hass) details.hass = this._hass;
+      details.value = this._config?.show_details !== false;
+      details.style.cssText = "display:block;padding:0 16px 16px";
+      details.addEventListener("value-changed", (e) =>
+        this._fire({ show_details: e.detail.value })
+      );
+      this._detailsField = details;
+      this.appendChild(details);
     }
   }
 }
@@ -440,11 +455,35 @@ class HaikuboxBirdCard extends HTMLElement {
     }
   }
 
-  // Custom action: pop up a modal showing the full ranked species list
-  // for this card's sensor, using the bird-list card. Native <dialog>
-  // gives us a backdrop, focus trap, and ESC-to-close for free; no
-  // external dependency (e.g. browser_mod) required.
+  // Custom action: pop up a modal showing the full ranked species list for
+  // this card's sensor, using the bird-list card.
   _openListPopup() {
+    this._openCardPopup(
+      { entity: this._config?.entity, top: 50, row_size: "large" },
+      "display:block;width:min(92vw,560px);height:min(80vh,720px)",
+    );
+  }
+
+  // "Details" button: pop up THIS bird's full detail view — the bird-list card
+  // in detail_only mode, scoped to this card's `position`. Reuses the list
+  // card's entire detail render (description, sparkline, audio, links,
+  // attribution); no duplicated rendering here.
+  _openDetailsPopup() {
+    this._openCardPopup(
+      {
+        entity: this._config?.entity,
+        position: this._config?.position ?? 1,
+        detail_only: true,
+        row_size: "large",
+      },
+      "display:block;width:clamp(320px,70vw,920px);height:auto;max-height:85vh;overflow:auto",
+    );
+  }
+
+  // Shared <dialog> popup hosting a haikubox-bird-list-card. Native <dialog>
+  // gives us a backdrop, focus trap, and ESC-to-close for free; no external
+  // dependency (e.g. browser_mod) required.
+  _openCardPopup(cardConfig, sizeCss) {
     const entity = this._config?.entity;
     if (!entity || !customElements.get("haikubox-bird-list-card")) return;
     if (this._popupDialog) return;  // already open
@@ -467,12 +506,12 @@ class HaikuboxBirdCard extends HTMLElement {
 
     const listCard = document.createElement("haikubox-bird-list-card");
     try {
-      listCard.setConfig({ entity, top: 50, row_size: "large" });
+      listCard.setConfig(cardConfig);
     } catch (_) {
       return;
     }
     // Give the card a concrete box; its internal list scrolls past this.
-    listCard.style.cssText = "display:block;width:min(92vw,560px);height:min(80vh,720px)";
+    listCard.style.cssText = sizeCss;
     if (this._hass) listCard.hass = this._hass;
 
     dialog.appendChild(listCard);
@@ -794,6 +833,32 @@ class HaikuboxBirdCard extends HTMLElement {
           outline-offset: 2px;
         }
         .play-call.playing { background: var(--accent-color, #ff9800); }
+        /* "Details" button — round overlay, bottom-right (opposite play). Opens
+         * this bird's full detail view in a popup. */
+        .details-btn {
+          position: absolute;
+          right: 6px;
+          bottom: 6px;
+          z-index: 3;  /* above the blur (0), photo (1), credit (2) */
+          width: 34px;
+          height: 34px;
+          padding: 0;
+          border: none;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1.1rem;
+          line-height: 1;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.5);
+          cursor: pointer;
+        }
+        .details-btn:hover { background: rgba(0, 0, 0, 0.7); }
+        .details-btn:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
       </style>
       <ha-card class="${actionable ? "actionable" : ""}"${actionable ? ' role="button" tabindex="0"' : ""}>
         <div class="layout">
@@ -810,6 +875,9 @@ class HaikuboxBirdCard extends HTMLElement {
                 : ""}
               ${this._config.show_audio !== false && bird.audio_url
                 ? `<button class="play-call" type="button" data-audio="${_esc(bird.audio_url)}" aria-label="Play recording of ${_esc(bird.species)}" title="Play call">▶</button>`
+                : ""}
+              ${this._config.show_details !== false
+                ? `<button class="details-btn" type="button" aria-label="Show details for ${_esc(bird.species)}" title="Details">ⓘ</button>`
                 : ""}
             </div>
             <div class="body">
@@ -857,6 +925,19 @@ class HaikuboxBirdCard extends HTMLElement {
         this._togglePlay(playBtn);
       });
       playBtn.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+      });
+    }
+
+    // Details button: open this bird's full detail popup. stopPropagation keeps
+    // it from also firing the card's tap action.
+    const detailsBtn = this.shadowRoot.querySelector(".details-btn");
+    if (detailsBtn) {
+      detailsBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._openDetailsPopup();
+      });
+      detailsBtn.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") e.stopPropagation();
       });
     }
