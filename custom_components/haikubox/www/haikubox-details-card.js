@@ -1,9 +1,57 @@
+// Ranked list card. This shares its render/logic with ha-birdweather's
+// birdweather-details-card.js — kept identical BY HAND except for (a) integration
+// wiring (names / platform / entity filter), (b) the FEATURES object below, which
+// hides editor toggles for data this integration doesn't supply, and (c) the
+// BirdWeather reference-link, which is BirdWeather-only and intentionally dropped
+// here. The render code carries the full feature set (confidence band, alpha
+// code, activity sparkline, photo attribution) and null-guards on missing data,
+// so an unsupported feature simply never appears. When you change one card,
+// mirror it in the other.
 function _esc(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Per-integration feature flags: which editor toggles to expose. Haikubox
+// surfaces no confidence or diel-activity data, so those toggles are hidden
+// (their render paths null-guard to nothing regardless).
+const FEATURES = { confidence: false, activity: false };
+
+// Confidence band → display label. The integration derives the low/medium/high
+// band from each detection's numeric confidence and surfaces it as
+// `confidence_band`; the card just labels it (the raw number stays hidden).
+function _bandLabel(band) {
+  return { low: "Low", medium: "Medium", high: "High" }[band] ?? "";
+}
+
+// Render a 24-bucket hourly array (the integration's `hourly` diel field) as a
+// Unicode sparkline, one block per hour, scaled to the array's own max. Returns
+// "" for an empty/all-zero array.
+function _sparkline(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return "";
+  const blocks = "▁▂▃▄▅▆▇█";
+  const max = Math.max(...arr);
+  if (max <= 0) return "";
+  return arr
+    .map((v) => blocks[v <= 0 ? 0 : Math.min(blocks.length - 1, Math.round((v / max) * (blocks.length - 1)))])
+    .join("");
+}
+
+// "HH:00" of the busiest hour in a 24-bucket array, or "".
+function _peakHourLabel(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return "";
+  let max = -1;
+  let idx = -1;
+  arr.forEach((v, h) => {
+    if (v > max) {
+      max = v;
+      idx = h;
+    }
+  });
+  return idx >= 0 && max > 0 ? String(idx).padStart(2, "0") + ":00" : "";
 }
 
 // Editor entity-picker filter: only show Haikubox sensors that expose
@@ -38,7 +86,9 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       if (this._ebirdField) this._ebirdField.value = !!config.show_ebird;
       if (this._aabField)   this._aabField.value   = !!config.show_allaboutbirds;
       if (this._mlField)    this._mlField.value    = !!config.show_macaulay;
+      if (this._confField)  this._confField.value  = config.show_confidence !== false;
       if (this._descField)  this._descField.value  = config.show_description !== false;
+      if (this._actField)   this._actField.value   = config.show_activity !== false;
       if (this._audioField) this._audioField.value = config.show_audio !== false;
     }
   }
@@ -56,7 +106,9 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       if (this._ebirdField) this._ebirdField.hass = hass;
       if (this._aabField)   this._aabField.hass   = hass;
       if (this._mlField)    this._mlField.hass    = hass;
+      if (this._confField)  this._confField.hass  = hass;
       if (this._descField)  this._descField.hass  = hass;
+      if (this._actField)   this._actField.hass   = hass;
       if (this._audioField) this._audioField.hass = hass;
     }
   }
@@ -181,8 +233,23 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       mlField.addEventListener("value-changed", (e) => this._fire({ show_macaulay: e.detail.value }));
       this._mlField = mlField;
 
-      // Wikipedia description blurb in the detail view (default on). Fetched on
-      // demand from Wikipedia when a row is opened.
+      const fields = [ebirdField, aabField, mlField];
+
+      // Confidence band in the expanded detail view (default on). Shows a
+      // low/medium/high chip alongside the count / last-heard metrics.
+      if (FEATURES.confidence) {
+        const confField = document.createElement("ha-selector");
+        confField.label = "Show confidence in detail view";
+        confField.selector = { boolean: {} };
+        if (this._hass) confField.hass = this._hass;
+        confField.value = this._config?.show_confidence !== false;
+        confField.addEventListener("value-changed", (e) => this._fire({ show_confidence: e.detail.value }));
+        this._confField = confField;
+        fields.push(confField);
+      }
+
+      // Wikipedia description blurb in the detail view (default on). Fetched
+      // on demand from Wikipedia when a row is opened.
       const descField = document.createElement("ha-selector");
       descField.label = "Show description in detail view";
       descField.selector = { boolean: {} };
@@ -190,9 +257,22 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       descField.value = this._config?.show_description !== false;
       descField.addEventListener("value-changed", (e) => this._fire({ show_description: e.detail.value }));
       this._descField = descField;
+      fields.push(descField);
+
+      // Diel activity sparkline in the detail view (default on).
+      if (FEATURES.activity) {
+        const actField = document.createElement("ha-selector");
+        actField.label = "Show activity sparkline in detail view";
+        actField.selector = { boolean: {} };
+        if (this._hass) actField.hass = this._hass;
+        actField.value = this._config?.show_activity !== false;
+        actField.addEventListener("value-changed", (e) => this._fire({ show_activity: e.detail.value }));
+        this._actField = actField;
+        fields.push(actField);
+      }
 
       // "Play the call" button in the detail view (default on). Plays the
-      // detection's recording (cached locally) in the browser.
+      // detection's recording in the browser.
       const audioField = document.createElement("ha-selector");
       audioField.label = "Show play-call button in detail view";
       audioField.selector = { boolean: {} };
@@ -200,8 +280,9 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
       audioField.value = this._config?.show_audio !== false;
       audioField.addEventListener("value-changed", (e) => this._fire({ show_audio: e.detail.value }));
       this._audioField = audioField;
+      fields.push(audioField);
 
-      form.append(ebirdField, aabField, mlField, descField, audioField);
+      form.append(...fields);
     }
 
     this.appendChild(form);
@@ -275,13 +356,14 @@ class HaikuboxBirdListCard extends HTMLElement {
     }
   }
 
-  // Play/pause a detection's recording in the browser (one Audio instance for
-  // the card). Failures (unavailable / unsupported) fall back to a brief label.
+  // Play/pause a detection's soundscape in the browser (one Audio instance for
+  // the card). FLAC plays in modern browsers; failures (unsupported / 404) fall
+  // back to a brief "unavailable" label rather than throwing.
   _togglePlay(btn) {
     const url = btn.dataset.audio;
     if (!url) return;
     if (this._playingBtn === btn && this._audio && !this._audio.paused) {
-      this._audio.pause();
+      this._audio.pause();  // 'pause' listener resets the icon
       return;
     }
     if (this._audio) this._audio.pause();
@@ -319,13 +401,16 @@ class HaikuboxBirdListCard extends HTMLElement {
     return `#${item.rank ?? index + 1}`;
   }
 
-  // External reference link anchors. Reference links are surfaced by the
-  // integration as per-record URL fields (`ebird_url` / `allaboutbirds_url` /
-  // `macaulay_url`) — the card just renders the ones present and enabled; it
-  // doesn't construct URLs itself. `f` is a flags object {ebird, aab, ml} gating
-  // each. Wikipedia is not a button — it's reached by tapping the description
-  // blurb. This is the shared link logic the Haikubox and BirdWeather cards
-  // converge on. Returns "" when nothing applies.
+  // External reference link anchors. eBird keys on the species code we
+  // already carry as sp_code; All About Birds keys on the common name
+  // with spaces → underscores (e.g. "Downy_Woodpecker", hyphens
+  // preserved). `ebird`/`aab` flags gate each; an anchor is skipped if
+  // its source field is missing. Returns "" when nothing applies.
+  // Reference links are surfaced by the integration as per-record URL fields
+  // (`ebird_url` / `allaboutbirds_url` / `wikipedia_url`) — the card just renders
+  // the ones present and enabled; it no longer constructs URLs itself. This is
+  // the shared link logic the Haikubox and Haikubox cards converge on; each
+  // integration decides which URLs to surface.
   _linkAnchors(item, f) {
     const btn = (url, label) =>
       `<a class="link-btn" href="${_esc(url)}" target="_blank" rel="noreferrer noopener" title="${_esc(item.species)} on ${label}">${label}</a>`;
@@ -333,12 +418,16 @@ class HaikuboxBirdListCard extends HTMLElement {
     if (f.ebird && item.ebird_url) parts.push(btn(item.ebird_url, "eBird"));
     if (f.aab && item.allaboutbirds_url) parts.push(btn(item.allaboutbirds_url, "All About Birds"));
     if (f.ml && item.macaulay_url) parts.push(btn(item.macaulay_url, "Macaulay Library"));
+    // Wikipedia is intentionally not a button: it's reached by tapping the
+    // description blurb (which is sourced from Wikipedia), so a separate pill
+    // would be redundant.
     return parts.join("");
   }
 
   // Wrap the requested anchors in a container, or "" if none. `cls`
   // distinguishes the compact-row block from the roomy detail block. `f` is a
-  // flags object {ebird, aab, ml}.
+  // flags object {ebird, aab, ml, bw} gating each link (Wikipedia is reached via
+  // the description blurb, not a button).
   _linksBlock(item, f, cls) {
     const anchors = this._linkAnchors(item, f);
     return anchors ? `<div class="${cls}">${anchors}</div>` : "";
@@ -348,7 +437,7 @@ class HaikuboxBirdListCard extends HTMLElement {
   // detail row is open. Static metadata, so the integration doesn't poll/store
   // it — the card fetches on demand and caches per species for the session. The
   // article title is derived from the integration-supplied wikipedia_url, so the
-  // same logic works on any source that has one (Haikubox, BirdWeather). Fails
+  // same logic works on any source that has one (Haikubox, Haikubox). Fails
   // silently (no blurb) when offline / unavailable.
   _loadDescription(species, wikiUrl, el) {
     if (!el || !wikiUrl) return;
@@ -372,6 +461,8 @@ class HaikuboxBirdListCard extends HTMLElement {
       .then((j) => {
         const text = j.extract || "";
         this._descCache.set(species, text);
+        // The list may have re-rendered/re-ordered during the fetch; only write
+        // if this element is still showing this species.
         if (el.isConnected && el.dataset.species === species) el.textContent = text;
       })
       .catch(() => {
@@ -387,6 +478,22 @@ class HaikuboxBirdListCard extends HTMLElement {
     if (!el) return;
     const item = this._items?.find((i) => i.species === this._openSpecies);
     if (item?.wikipedia_url) this._loadDescription(item.species, item.wikipedia_url, el);
+  }
+
+  // Photo credit/license for the expanded view. The coordinator sanitises
+  // Haikubox's HTML credit to plain text + URL, so these are safe to link.
+  // The station photos are CC-licensed, which requires attribution.
+  _attributionBlock(item) {
+    if (this._config?.show_attribution === false || !item.image_url) return "";
+    const link = (text, url) =>
+      url
+        ? `<a href="${_esc(url)}" target="_blank" rel="noopener noreferrer">${_esc(text)}</a>`
+        : _esc(text);
+    const parts = [];
+    if (item.image_credit) parts.push(link(item.image_credit, item.image_credit_url));
+    if (item.image_license) parts.push(link(item.image_license, item.image_license_url));
+    if (!parts.length) return "";
+    return `<div class="detail-attribution">📷 ${parts.join(" · ")}</div>`;
   }
 
   _relativeTime(isoString) {
@@ -548,10 +655,10 @@ class HaikuboxBirdListCard extends HTMLElement {
         .list.size-large .detail-name { font-size: 1.55em; }
         .list.size-large .detail-sci { font-size: 1.2em; }
 
-        /* External reference link buttons (eBird / All About Birds / Macaulay
-           Library). The species name takes priority: the cluster is capped and
-           allowed to shrink, so once it's wide enough the buttons stack into a
-           second/third row instead of squeezing the name. */
+        /* External reference link buttons (eBird / Wikipedia / All About Birds /
+           Macaulay Library / Haikubox). The species name takes priority: the
+           cluster is capped and allowed to shrink, so once it's wide enough the
+           buttons stack into a second/third row instead of squeezing the name. */
         .row-links {
           display: flex;
           flex-wrap: wrap;
@@ -682,6 +789,12 @@ class HaikuboxBirdListCard extends HTMLElement {
           gap: 8px;
           margin-top: 10px;
         }
+        .detail-attribution {
+          margin-top: 10px;
+          font-size: 0.72em;
+          color: var(--secondary-text-color);
+        }
+        .detail-attribution a { color: inherit; }
         .metrics {
           display: flex;
           flex-wrap: wrap;
@@ -699,8 +812,40 @@ class HaikuboxBirdListCard extends HTMLElement {
           color: var(--primary-text-color);
           font-weight: 600;
         }
+        /* Confidence band chip — a colored dot keys the low/medium/high level;
+           the chip itself stays neutral so it sits quietly with the others. */
+        .metric .conf-dot {
+          display: inline-block;
+          width: 0.6em;
+          height: 0.6em;
+          border-radius: 50%;
+          margin-right: 5px;
+          background: var(--secondary-text-color);
+        }
+        .metric.conf-high .conf-dot { background: var(--success-color, #43a047); }
+        .metric.conf-medium .conf-dot { background: var(--warning-color, #fb8c00); }
+        .metric.conf-low .conf-dot { background: var(--error-color, #e53935); }
 
-        /* "Play the call" button — plays the detection's recording in-browser. */
+        /* Diel activity sparkline — one Unicode block per hour (0–23), in a
+           monospace face so the bars align; the peak-hour label sits beside it. */
+        .detail-activity {
+          display: flex;
+          align-items: baseline;
+          flex-wrap: wrap;
+          gap: 4px 8px;
+          margin-top: 10px;
+          font-size: 0.8em;
+          color: var(--secondary-text-color);
+        }
+        .detail-activity .spark {
+          font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+          letter-spacing: 1px;
+          line-height: 1;
+          color: var(--primary-color);
+          white-space: nowrap;
+        }
+
+        /* "Play the call" button — plays the detection's soundscape in-browser. */
         .play-call {
           display: inline-flex;
           align-items: center;
@@ -766,11 +911,19 @@ class HaikuboxBirdListCard extends HTMLElement {
                       <div class="metrics">
                         ${item.count != null ? `<div class="metric"><strong>${_esc(item.count)}×</strong></div>` : ""}
                         ${t ? `<div class="metric">last heard <strong data-last-seen="${_esc(item.last_seen)}">${_esc(t)}</strong></div>` : ""}
+                        ${this._config.show_confidence !== false && item.confidence_band
+                          ? `<div class="metric conf-${_esc(item.confidence_band)}" title="Detection confidence"><span class="conf-dot"></span><strong>${_esc(_bandLabel(item.confidence_band))}</strong> confidence</div>`
+                          : ""}
+                        ${item.alpha ? `<div class="metric" title="Alpha banding code"><strong>${_esc(item.alpha)}</strong></div>` : ""}
                       </div>
+                      ${this._config.show_activity !== false && Array.isArray(item.hourly) && item.hourly.some((v) => v > 0)
+                        ? `<div class="detail-activity" title="Hourly activity (last 7 days)"><span class="spark">${_sparkline(item.hourly)}</span><span class="peak">most active ~${_peakHourLabel(item.hourly)}</span></div>`
+                        : ""}
                       ${this._config.show_audio !== false && item.audio_url
-                        ? `<button class="play-call" type="button" data-audio="${_esc(item.audio_url)}" aria-label="Play recording of ${_esc(item.species)}"><span class="play-icon">▶</span><span class="play-label">Play call</span></button>`
+                        ? `<button class="play-call" type="button" data-audio="${_esc(item.audio_url)}" data-species="${_esc(item.species)}" aria-label="Play recording of ${_esc(item.species)}"><span class="play-icon">▶</span><span class="play-label">Play call</span></button>`
                         : ""}
                       ${this._linksBlock(item, { ebird: true, aab: true, ml: true }, "detail-links")}
+                      ${this._attributionBlock(item)}
                     </div>
                   </div>
                 </div>
@@ -799,7 +952,7 @@ class HaikuboxBirdListCard extends HTMLElement {
       this._toggleItem(item);
     });
 
-    // "Play the call": play the detection's recording in-browser. stopPropagation
+    // "Play the call": play the detection's soundscape in-browser. stopPropagation
     // keeps the row from toggling; one Audio instance, play/pause toggling.
     this.shadowRoot.querySelectorAll(".play-call").forEach((btn) => {
       btn.addEventListener("click", (e) => {
