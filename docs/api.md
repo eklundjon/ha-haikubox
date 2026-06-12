@@ -47,7 +47,7 @@ sequenceDiagram
     loop For each new sp_code seen
         Coord->>S3: GET sp_code.jpeg
         S3-->>Coord: JPEG bytes
-        Coord->>Store: write to /config/www/haikubox
+        Coord->>Store: write to /config/haikubox
     end
 
     Coord->>Store: persist any changed lookup or store
@@ -131,12 +131,12 @@ The cache is write-once-per-species:
 
 1. On every detection, the coordinator calls `ImageCache.async_fetch(sp_code)`.
 2. If the species code is already in the in-memory `_cached` set, the local URL is returned without touching the network.
-3. Otherwise, the JPEG is downloaded (`aiohttp` GET), written to `/config/www/haikubox/<sp_code>.jpeg` via `aiofiles`, and added to `_cached`.
-4. The species's `image_url` is rewritten to `/local/haikubox/<sp_code>.jpeg` — served by HA's own static handler, so it works offline once cached.
+3. Otherwise, the JPEG is downloaded (`aiohttp` GET), written to `/config/haikubox/<sp_code>.jpeg` via `aiofiles`, and added to `_cached`.
+4. The species's `image_url` is rewritten to `/haikubox/cache/<sp_code>.jpeg` — served by the integration's **own** static path (registered in `async_setup`, with the directory created first), so it works offline once cached and doesn't depend on HA's `/local` being mounted.
 
 If the S3 fetch fails (404, network error), `async_fetch` falls back to returning the remote S3 URL — the card shows the photo on first paint, and the next successful poll caches it. `url_for(sp_code)` (used by `_build_today_top` / `_build_baseline_top` for non-1h-window species) applies the same fallback synchronously.
 
-The cache directory is indexed once at integration startup (`async_init` → `_index`, single executor hop to scan `/config/www/haikubox/`). After that, every URL lookup is an in-memory set check.
+The cache directory is indexed once at integration startup (`async_init` → `_index`, single executor hop to scan `/config/haikubox/`). After that, every URL lookup is an in-memory set check.
 
 ## Polling cadence
 

@@ -185,7 +185,7 @@ The detail view shows a short **Wikipedia** description, fetched on demand the f
 
 When a row has a cached recording, the detail view shows a **▶ Play call** button (and the bird card shows a round play button over the photo) that plays the detection's audio in the browser. Toggle the card element with `show_audio` (default on; both cards).
 
-**Audio is off by default** — it's downloading, normalizing and caching work, so you opt in: **Settings → Devices & Services → Haikubox → Configure → "Audio: enable 'play the call'"**. Once on, Haikubox's recording URLs (which expire after ~1 hour) are downloaded to `config/www/haikubox/audio/<serial>/` (namespaced per box) and served as stable local copies. The **headline** detections (last + notable) are always kept for 30 days; to also cache the full recent feed, raise **"Audio: extra days to cache the full feed"** (0 = headline only). Requires `ffmpeg` (bundled with Home Assistant).
+**Audio is off by default** — it's downloading, normalizing and caching work, so you opt in: **Settings → Devices & Services → Haikubox → Configure → "Audio: enable 'play the call'"**. Once on, Haikubox's recording URLs (which expire after ~1 hour) are downloaded to `config/haikubox/audio/<serial>/` (namespaced per box) and served as stable local copies from the integration's own static path. The **headline** detections (last + notable) are always kept for 30 days; to also cache the full recent feed, raise **"Audio: extra days to cache the full feed"** (0 = headline only). Requires `ffmpeg` (bundled with Home Assistant).
 
 Two things to know about which rows get a button:
 
@@ -306,7 +306,7 @@ To inspect: **Developer Tools → States** → search for the entity → the `de
 
 Each card replaces a broken image with the 🐦 placeholder automatically, so if you're seeing the placeholder it means the image URL didn't load.
 
-- Check `/config/www/haikubox/` exists and contains JPEGs. If the folder was deleted, the cache will rebuild on subsequent polls as species are detected (any active species cycles through the cache within ~10 minutes).
+- Check `/config/haikubox/` exists and contains JPEGs. If the folder was deleted, the cache will rebuild on subsequent polls as species are detected (any active species cycles through the cache within ~10 minutes).
 - The cards display the **cached** local URL when available, falling back to the remote S3 URL otherwise — so the 🐦 placeholder only appears when both fail.
 
 ### "Configure" button missing for an integration option (e.g. notability slider)

@@ -6,6 +6,17 @@ CONF_DEVICE_NAME = "device_name"
 API_BASE = "https://api.haikubox.com"
 IMAGES_BASE = "https://haikubox-images.s3.amazonaws.com"
 
+# On-disk cache for downloaded photos and audio clips. Served through the
+# integration's OWN static path (registered in async_setup), NOT Home
+# Assistant's /local: /local is only mounted when config/www exists at boot, so
+# a fresh install would 404 every cached URL until the next restart. Serving it
+# ourselves also keeps the integration out of the user's config/www. The cache
+# lives at config/<CACHE_DIR_NAME>/ and is exposed at <CACHE_URL_BASE>/...
+#   images: config/haikubox/<sp_code>.jpeg          → /haikubox/cache/<sp_code>.jpeg
+#   audio:  config/haikubox/audio/<serial>/<cid>.flac → /haikubox/cache/audio/<serial>/<cid>.flac
+CACHE_DIR_NAME = "haikubox"          # under hass.config.path(...)
+CACHE_URL_BASE = "/haikubox/cache"   # static route serving the cache dir
+
 # How often to poll the API (seconds). User-tunable via the options flow as
 # CONF_SCAN_INTERVAL (in MINUTES; floor 5, ceiling 60) — HA lets users disable
 # polling but not set a custom rate, so this fills that gap. Shorter = fresher
@@ -124,9 +135,10 @@ DEFAULT_ABSENCE_DAYS = 30
 # Detection-audio cache. /detections carries a per-detection `wav` (a short FLAC)
 # as an AWS presigned URL that expires in ~1 hour, so to make "play the call"
 # robust (survive expiry + restarts, and keep the signed URL out of HA state) we
-# download clips to config/www/haikubox/audio/<serial>/ (namespaced per box, so
+# download clips to config/haikubox/audio/<serial>/ (namespaced per box, so
 # each box's retention window and clip cap are independent, and removing one
-# box's cache never touches another's) and serve stable /local/ paths.
+# box's cache never touches another's) and serve them from the integration's
+# own static path (CACHE_URL_BASE).
 #
 # Two tiers, to stay gentle on Haikubox's API by default:
 #   * HEADLINE — always on: only the headline records (last + notable detection),

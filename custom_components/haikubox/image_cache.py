@@ -8,13 +8,14 @@ import aiofiles
 
 from homeassistant.core import HomeAssistant
 
-from .const import IMAGES_BASE
+from .const import CACHE_DIR_NAME, CACHE_URL_BASE, IMAGES_BASE
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class ImageCache:
-    """Downloads species photos once and serves them from /local/.
+    """Downloads species photos once and serves them from the integration's
+    own static path (see CACHE_URL_BASE) rather than HA's /local.
 
     An in-memory index of cached sp_codes is built once at startup so
     URL lookups never touch the filesystem afterwards.
@@ -23,7 +24,7 @@ class ImageCache:
     def __init__(self, hass: HomeAssistant, session: aiohttp.ClientSession) -> None:
         self._hass = hass
         self._session = session
-        self._dir: Path = Path(hass.config.path("www", "haikubox"))
+        self._dir: Path = Path(hass.config.path(CACHE_DIR_NAME))
         self._cached: set[str] = set()
 
     async def async_init(self) -> None:
@@ -45,13 +46,13 @@ class ImageCache:
         if not sp_code:
             return None
         if sp_code in self._cached:
-            return f"/local/haikubox/{sp_code}.jpeg"
+            return f"{CACHE_URL_BASE}/{sp_code}.jpeg"
         return f"{IMAGES_BASE}/{sp_code}.jpeg"
 
     async def async_fetch(self, sp_code: str) -> str:
         """Return a URL for the species image, downloading it if needed."""
         if sp_code in self._cached:
-            return f"/local/haikubox/{sp_code}.jpeg"
+            return f"{CACHE_URL_BASE}/{sp_code}.jpeg"
 
         local_path = self._dir / f"{sp_code}.jpeg"
         url = f"{IMAGES_BASE}/{sp_code}.jpeg"
@@ -68,4 +69,4 @@ class ImageCache:
         except aiohttp.ClientError as err:
             _LOGGER.debug("Could not cache image for %s: %s", sp_code, err)
             return url
-        return f"/local/haikubox/{sp_code}.jpeg"
+        return f"{CACHE_URL_BASE}/{sp_code}.jpeg"

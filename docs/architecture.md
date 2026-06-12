@@ -32,7 +32,7 @@ graph TB
         API["api.haikubox.com"]
         S3["haikubox-images S3"]
         HAStore["HA .storage/<br/>6 JSON files"]
-        WWW["HA www/haikubox/<br/>cached JPEGs"]
+        WWW["config/haikubox/<br/>cached photos + audio"]
     end
 
     ConfigFlow -- "validates serial" --> API
@@ -164,7 +164,7 @@ Each store is written **only when its data changes**, gated by a dirty flag. The
 
 ### 3. On-disk image cache
 
-Bird photos live in `/config/www/haikubox/<sp_code>.jpeg`. The directory is served by HA's static handler at `/local/haikubox/<sp_code>.jpeg`. `ImageCache` builds an in-memory `_cached: set[str]` from the directory contents at startup so URL lookups are pure memory checks afterwards.
+Bird photos live in `/config/haikubox/<sp_code>.jpeg` (audio clips alongside them under `audio/<serial>/`). The directory is served by the integration's **own** static path at `/haikubox/cache/<sp_code>.jpeg`, registered in `async_setup` after the directory is created — so it works on a fresh install without depending on HA's `/local` (which HA only mounts when `config/www` exists at boot). It also keeps the integration out of the user's `config/www`. `ImageCache` builds an in-memory `_cached: set[str]` from the directory contents at startup so URL lookups are pure memory checks afterwards.
 
 ## Lifecycle
 

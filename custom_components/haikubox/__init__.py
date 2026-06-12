@@ -10,7 +10,14 @@ from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.loader import async_get_integration
 
 from .audio_cache import AudioCache
-from .const import CONF_AUDIO_ENABLED, CONF_SERIAL, DEFAULT_AUDIO_ENABLED, DOMAIN
+from .const import (
+    CACHE_DIR_NAME,
+    CACHE_URL_BASE,
+    CONF_AUDIO_ENABLED,
+    CONF_SERIAL,
+    DEFAULT_AUDIO_ENABLED,
+    DOMAIN,
+)
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -26,10 +33,16 @@ _CARDS = [
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register static paths and inject card JS once at integration load time."""
     www = Path(__file__).parent
+    # Relocate any pre-existing cache out of config/www, then ensure the cache
+    # dir exists *before* registering it: HA only mounts a static directory
+    # whose path exists at registration time (the same rule that makes /local
+    # unavailable on a fresh install until a restart). Doing it here means the
+    # cache is always served, with no /local dependency.
+    cache_dir = hass.config.path(CACHE_DIR_NAME)
+    await hass.async_add_executor_job(_migrate_cache_location, hass)
     await hass.http.async_register_static_paths([
-        StaticPathConfig(url, str(www / path))
-        for url, path in _CARDS
-    ])
+        StaticPathConfig(url, str(www / path)) for url, path in _CARDS
+    ] + [StaticPathConfig(CACHE_URL_BASE, cache_dir, True)])
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version or "dev"
     for url, _ in _CARDS:
@@ -37,6 +50,34 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         # default cache headers would serve a stale card after an update.
         add_extra_js_url(hass, f"{url}?v={version}")
     return True
+
+
+def _migrate_cache_location(hass: HomeAssistant) -> None:
+    """Relocate the cache out of config/www into config/<CACHE_DIR_NAME>, and
+    ensure the destination exists.
+
+    Earlier versions wrote photos and audio clips under config/www/haikubox and
+    served them through HA's /local. We now serve them from our own static path
+    (CACHE_URL_BASE), so move the existing files (preserving the cache) and stop
+    writing into the user's www. One-time and idempotent — once the old dir is
+    gone this just ensures the new dir exists (so the static path can mount).
+    """
+    new = Path(hass.config.path(CACHE_DIR_NAME))
+    new.mkdir(parents=True, exist_ok=True)
+    old = Path(hass.config.path("www", "haikubox"))
+    if not old.is_dir():
+        return
+    for item in old.iterdir():
+        target = new / item.name
+        if not target.exists():
+            try:
+                item.rename(target)
+            except OSError:
+                pass
+    try:
+        old.rmdir()  # only succeeds if empty (anything left behind keeps it)
+    except OSError:
+        pass
 
 
 # 0.4 renamed sensors for naming consistency; migrate their
@@ -76,8 +117,8 @@ async def _migrate_flat_audio_cache(
 ) -> None:
     """One-time relocation of 0.7's flat audio cache into the per-serial layout.
 
-    0.7 cached "play the call" clips flat in `www/haikubox/audio/*.flac`; clips
-    are now namespaced under `audio/<serial>/`. The flat dir mixed clips from
+    0.7 cached "play the call" clips flat in the audio cache root (`*.flac`);
+    clips are now namespaced under `audio/<serial>/`. The flat dir mixed clips from
     every box with no way to attribute one to a serial, so the first box with
     audio ENABLED to set up claims them all into its own subdir — some
     preservation beats none. Clips that actually belonged to another box are
@@ -95,7 +136,7 @@ async def _migrate_flat_audio_cache(
 
 
 def _relocate_flat_audio(hass: HomeAssistant, dest: Path) -> None:
-    root = Path(hass.config.path("www", "haikubox", "audio"))
+    root = Path(hass.config.path(CACHE_DIR_NAME, "audio"))
     # glob("*.flac") matches only loose files in the root, not the per-serial
     # subdirs, so this naturally no-ops once migration has run.
     flat = list(root.glob("*.flac")) if root.is_dir() else []
@@ -142,10 +183,10 @@ async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) ->
     """Clean up a removed box's on-disk state.
 
     Removes this box's per-serial `.storage` files and its namespaced audio
-    cache (`config/www/haikubox/audio/<serial>/`) — both are box-specific, so
+    cache (`config/haikubox/audio/<serial>/`) — both are box-specific, so
     they're safe to delete regardless of other boxes. The image cache
-    (`config/www/haikubox/*.jpeg`) holds global Haikubox assets shared by every
-    box, so the whole tree is removed only once no Haikubox entries remain — by
+    (`config/haikubox/*.jpeg`) holds global Haikubox assets shared by every box,
+    so the whole cache dir is removed only once no Haikubox entries remain — by
     the time this runs HA has already dropped the entry being removed, so an
     empty list means it was the last.
     """
@@ -159,7 +200,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) ->
     )
 
     # Shared image cache (+ the now-orphaned audio parent): only wipe the whole
-    # tree when the last box is gone.
+    # cache dir when the last box is gone.
     if not hass.config_entries.async_entries(DOMAIN):
-        cache_dir = Path(hass.config.path("www", "haikubox"))
+        cache_dir = Path(hass.config.path(CACHE_DIR_NAME))
         await hass.async_add_executor_job(shutil.rmtree, cache_dir, True)

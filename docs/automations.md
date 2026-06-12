@@ -48,7 +48,7 @@ table below), so you can mix and match — e.g. add eBird buttons to the
 unusual-visitor push, or play the call on a new species. Use the shipped
 blueprints as recipes and copy the bits you want.
 
-> **Audio caveats.** `audio_url` is a `/local/...` URL, so it only resolves from
+> **Audio caveats.** `audio_url` is a local `/haikubox/cache/...` URL, so it only resolves from
 > inside your HA network, and the clips are **FLAC** — which iOS notification
 > attachments may not play, and some media players don't support. It works best
 > for an in-network media player that handles FLAC. (Audio must also be enabled
@@ -93,7 +93,7 @@ Event data:
 | `scientific_name` | Scientific name. |
 | `sp_code` | eBird species code. |
 | `image_url` | Photo URL for the species (may be absent). |
-| `audio_url` | Local `/local/...` URL of the species' cached call recording, or `null` when audio is disabled or no clip is cached. Reachable only from inside your HA network (use it as a notification audio attachment). |
+| `audio_url` | Local `/haikubox/cache/...` URL of the species' cached call recording, or `null` when audio is disabled or no clip is cached. Reachable only from inside your HA network (use it as a notification audio attachment). |
 | `last_seen` | Timestamp of this detection. |
 | `count` | Times this species was heard in the recent (1-hour) window. |
 | `ebird_url` | eBird species page. |
