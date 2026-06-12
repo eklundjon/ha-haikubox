@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 
 import aiofiles
 import aiohttp
-
 from homeassistant.core import HomeAssistant
 
 from .const import (

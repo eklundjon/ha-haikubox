@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import aiohttp
 from homeassistant.core import HomeAssistant
 
@@ -38,13 +40,12 @@ class _Session:
 
 async def test_box_tz_returns_cached_without_fetching(hass: HomeAssistant) -> None:
     """A resolved tz is reused; the endpoint isn't hit again."""
-    from datetime import timezone
 
     c = make_coordinator(hass)
-    c._box_tz = timezone.utc
+    c._box_tz = UTC
     # session would raise if touched — proves the cache short-circuits.
     c._session = _Session(exc=aiohttp.ClientError("should not be called"))
-    assert await c._async_box_tz() is timezone.utc
+    assert await c._async_box_tz() is UTC
 
 
 async def test_box_tz_resolves_from_api(hass: HomeAssistant) -> None:

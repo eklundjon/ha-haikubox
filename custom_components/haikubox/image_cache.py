@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import aiohttp
 import aiofiles
-
+import aiohttp
 from homeassistant.core import HomeAssistant
 
 from .const import CACHE_DIR_NAME, CACHE_URL_BASE, IMAGES_BASE
