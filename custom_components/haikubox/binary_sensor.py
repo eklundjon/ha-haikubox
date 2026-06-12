@@ -6,12 +6,11 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_SERIAL, DOMAIN
+from .const import CONF_SERIAL
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
+from .entity import HaikuboxEntity
 
 PARALLEL_UPDATES = 0
 
@@ -26,9 +25,7 @@ async def async_setup_entry(
     async_add_entities([HaikuboxExtendedSilenceSensor(coordinator, serial)])
 
 
-class HaikuboxExtendedSilenceSensor(
-    CoordinatorEntity[HaikuboxCoordinator], BinarySensorEntity
-):
+class HaikuboxExtendedSilenceSensor(HaikuboxEntity, BinarySensorEntity):
     """Problem sensor: on when the box has logged no detections in the
     trailing 24-hour window (an "extended silence").
 
@@ -44,7 +41,6 @@ class HaikuboxExtendedSilenceSensor(
     too — "we don't know" rather than a false problem.
     """
 
-    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_translation_key = "extended_silence"
     # Device-health signal (is the box alive?), not a bird observation — so it
@@ -53,18 +49,8 @@ class HaikuboxExtendedSilenceSensor(
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
-        super().__init__(coordinator)
-        self._serial = serial
+        super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_extended_silence"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._serial)},
-            name=self.coordinator.device_name,
-            manufacturer="Haikubox",
-            model="Haikubox",
-        )
 
     @property
     def is_on(self) -> bool:

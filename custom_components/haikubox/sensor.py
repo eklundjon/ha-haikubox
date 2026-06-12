@@ -10,13 +10,12 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_SERIAL, DOMAIN
+from .const import CONF_SERIAL
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
+from .entity import HaikuboxEntity
 
 PARALLEL_UPDATES = 0
 
@@ -49,10 +48,8 @@ async def async_setup_entry(
     )
 
 
-class _HaikuboxSensor(CoordinatorEntity[HaikuboxCoordinator], SensorEntity):
-    """Base class for Haikubox sensors."""
-
-    _attr_has_entity_name = True
+class _HaikuboxSensor(HaikuboxEntity, SensorEntity):
+    """Base class for Haikubox sensors (device info comes from HaikuboxEntity)."""
 
     # Every listy sensor exposes its list under `detections`. It stays on
     # the live state object so the cards can read it, but the recorder must
@@ -60,19 +57,6 @@ class _HaikuboxSensor(CoordinatorEntity[HaikuboxCoordinator], SensorEntity):
     # with images/scientific names and would bloat the history DB and trip
     # HA's state-attribute size warnings.
     _unrecorded_attributes = frozenset({"detections"})
-
-    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
-        super().__init__(coordinator)
-        self._serial = serial
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._serial)},
-            name=self.coordinator.device_name,
-            manufacturer="Haikubox",
-            model="Haikubox",
-        )
 
 
 class HaikuboxRecentDetectionsSensor(_HaikuboxSensor):
