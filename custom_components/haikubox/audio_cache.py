@@ -16,6 +16,8 @@ from homeassistant.core import HomeAssistant
 from .const import (
     AUDIO_NORM_MAX_GAIN_DB,
     AUDIO_SILENCE_FLOOR_DB,
+    CACHE_DIR_NAME,
+    CACHE_URL_BASE,
     DEFAULT_AUDIO_NORM_TARGET,
 )
 
@@ -23,12 +25,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class AudioCache:
-    """Downloads detection audio clips and serves them from /local/.
+    """Downloads detection audio clips and serves them from the
+    integration's own static path (see CACHE_URL_BASE).
 
     Haikubox's `/detections` `wav` is a short FLAC behind an AWS *presigned*
     URL that expires in ~1 hour. Caching the clip locally makes "play the call"
     robust (survives expiry + restarts) and keeps the signed URL — which embeds
-    a temporary AWS token — out of HA state entirely (we serve a /local path).
+    a temporary AWS token — out of HA state entirely (we serve a stable local
+    cache path instead).
 
     Clips are keyed by a hash of the S3 object *path* (the query/signature
     changes every fetch, the path doesn't), so the same detection maps to the
@@ -43,8 +47,8 @@ class AudioCache:
 
     @staticmethod
     def dir_for(hass: HomeAssistant, serial: str) -> Path:
-        """The per-box audio cache directory (`www/haikubox/audio/<serial>`)."""
-        return Path(hass.config.path("www", "haikubox", "audio", serial))
+        """The per-box audio cache directory (`config/haikubox/audio/<serial>`)."""
+        return Path(hass.config.path(CACHE_DIR_NAME, "audio", serial))
 
     def __init__(
         self,
@@ -84,23 +88,23 @@ class AudioCache:
         return hashlib.sha1(path.encode()).hexdigest()[:16] if path else None
 
     def url_for(self, wav_url: str | None) -> str | None:
-        """Local /local URL if the clip is already cached, else None.
+        """Local cache URL if the clip is already cached, else None.
 
         Pure lookup (no download), so it cheaply resolves audio for *every*
         record — clips cached on an earlier poll resolve too.
         """
         cid = self.clip_id(wav_url)
         if cid and cid in self._cached:
-            return f"/local/haikubox/audio/{self._serial}/{cid}.flac"
+            return f"{CACHE_URL_BASE}/audio/{self._serial}/{cid}.flac"
         return None
 
     async def async_fetch(self, wav_url: str | None) -> str | None:
-        """Download the clip if needed; return its /local URL (None on failure)."""
+        """Download the clip if needed; return its cache URL (None on failure)."""
         cid = self.clip_id(wav_url)
         if not cid:
             return None
         if cid in self._cached:
-            return f"/local/haikubox/audio/{self._serial}/{cid}.flac"
+            return f"{CACHE_URL_BASE}/audio/{self._serial}/{cid}.flac"
         if cid in self._silent:
             return None  # known to have no real signal; don't re-download
         try:
@@ -125,7 +129,7 @@ class AudioCache:
                 return None
             await self._normalize(path, peak)
         self._cached.add(cid)
-        return f"/local/haikubox/audio/{self._serial}/{cid}.flac"
+        return f"{CACHE_URL_BASE}/audio/{self._serial}/{cid}.flac"
 
     async def _normalize(self, path: Path, peak: float | None) -> None:
         """Peak-normalize a freshly cached clip in place (best-effort).

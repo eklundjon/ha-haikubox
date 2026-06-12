@@ -207,9 +207,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # first poll fires no unusual_visitor events (avoids a restart flood).
         self._prev_recent_species: set[str] | None = None
 
-        # Species photo cache (downloads once, serves from /local/)
+        # Species photo cache (downloads once, served via our static path)
         self._images = ImageCache(hass, self._session)
-        # Detection-audio cache (downloads recent clips, serves from /local/);
+        # Detection-audio cache (downloads recent clips, served via our static path);
         # ffmpeg (bundled with HA) is used to peak-normalize the quiet clips.
         # The whole pipeline is opt-in (read once here; options changes reload
         # the entry, so this is re-evaluated): when off, nothing is indexed,
@@ -233,7 +233,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Called from async_remove_entry when the integration entry is removed.
         Store.async_remove() no-ops if a file is already gone. The shared image
-        cache under config/www/haikubox/ is NOT touched here — it's keyed by
+        cache under config/haikubox/ is NOT touched here — it's keyed by
         species code, not serial, so it's cleaned up only when the last box
         goes away (see __init__.async_remove_entry)."""
         for suffix in (*_STORE_SUFFIXES, *_LEGACY_STORE_SUFFIXES):
@@ -395,7 +395,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # species); the actual earliest dt has to come from the raw
         # payload (issue #19 item F).
         # Image fetches populate the cache so _build_new_species_history
-        # (which reads via url_for) returns /local/ URLs for seeded species.
+        # (which reads via url_for) returns cached URLs for seeded species.
         if not self._seen_species and daily_count:
             first_seen_by_species = _first_seen_per_species(daily_raw)
             for d in daily_count:
@@ -1687,7 +1687,7 @@ def _build_recent_events(
     with its own `dt`. Rarity is looked up by species so all events for
     the same species carry the same `rarity_score` / `yearly_rank`.
 
-    `image_url_for` is `ImageCache.url_for` — returns the cached `/local/`
+    `image_url_for` is `ImageCache.url_for` — returns the cached local
     URL when available, falling back to the API URL otherwise (matching
     how the per-species records' image_url is derived).
     """
