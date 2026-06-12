@@ -5,6 +5,7 @@ from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.loader import async_get_integration
@@ -22,7 +23,7 @@ from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 _CARDS = [
     ("/haikubox/haikubox-bird-card.js",      "www/haikubox-bird-card.js"),
