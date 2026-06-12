@@ -149,7 +149,12 @@ class HaikuboxDailyCountSensor(_HaikuboxSensor):
     _attr_translation_key = "daily_count"
     _attr_icon = "mdi:counter"
     _attr_native_unit_of_measurement = "detections"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    # A running daily total that climbs through the day and resets to ~0 at the
+    # box's local midnight — i.e. a resetting counter, so TOTAL_INCREASING (not
+    # MEASUREMENT). HA reads the midnight drop as a reset and keeps the
+    # long-term sum continuous. (The curated cross-day history is still the
+    # backfilled external statistic; this is the live per-day view.)
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
