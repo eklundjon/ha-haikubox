@@ -12,13 +12,13 @@ from the summary; notability is forced to pure-rarity (recency-independent).
 
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, ".")
-from custom_components.haikubox.coordinator import HaikuboxCoordinator  # noqa: E402
 from custom_components.haikubox.const import CONF_NOTABLE_RARITY_WEIGHT  # noqa: E402
+from custom_components.haikubox.coordinator import HaikuboxCoordinator  # noqa: E402
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _iso(minutes_ago: int) -> str:
@@ -58,7 +58,7 @@ async def main() -> None:
     c.device_name = "Test Box"
     c.hass = None
     c.config_entry = _FakeEntry()
-    c._box_tz = timezone.utc
+    c._box_tz = UTC
     c._images = _FakeImages()
     c._audio = None  # canned data has no wav → audio resolve short-circuits
     c._audio_enabled = False
@@ -90,7 +90,7 @@ async def main() -> None:
         if date_str == today.isoformat():
             return {"American Robin": 120, "Northern Cardinal": 44, "Barred Owl": 2}
         return c._daily_counts.get(date_str, {})
-    async def fake_box_tz(): return timezone.utc
+    async def fake_box_tz(): return UTC
     c._fetch_detections = fake_detections
     c._fetch_daily_count = fake_daily_count
     c._async_box_tz = fake_box_tz

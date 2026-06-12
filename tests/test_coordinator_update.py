@@ -7,7 +7,7 @@ pure-rarity notability (weight 100) so the result doesn't depend on "now".
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from homeassistant.core import HomeAssistant
 
@@ -15,7 +15,7 @@ from custom_components.haikubox.const import CONF_NOTABLE_RARITY_WEIGHT
 
 from .coordinator_helpers import make_coordinator
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _TODAY = _NOW.date()
 
 
@@ -65,7 +65,7 @@ async def _run_poll(hass) -> dict:
         return c._daily_counts.get(date_str, {})
 
     async def fake_box_tz():
-        return timezone.utc
+        return UTC
 
     c._fetch_detections = fake_detections
     c._fetch_daily_count = fake_daily_count

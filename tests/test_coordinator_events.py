@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -38,7 +38,7 @@ def _rec(species: str, sp_code: str = "xxxxxx", **extra) -> dict:
 
 
 def _days_ago(n: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=n)).isoformat()
+    return (datetime.now(UTC) - timedelta(days=n)).isoformat()
 
 
 @pytest.fixture

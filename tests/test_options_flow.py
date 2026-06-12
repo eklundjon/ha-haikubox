@@ -6,6 +6,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.haikubox.config_flow import (
+    SECTION_ADVANCED,
+    SECTION_AUDIO,
+    SECTION_WATCHED,
+)
 from custom_components.haikubox.const import (
     CONF_ABSENCE_DAYS,
     CONF_AUDIO_CACHE_DAYS,
@@ -21,11 +26,6 @@ from custom_components.haikubox.const import (
     CONF_WATCHED_EXTRA,
     CONF_WATCHED_SPECIES,
     DOMAIN,
-)
-from custom_components.haikubox.config_flow import (
-    SECTION_ADVANCED,
-    SECTION_AUDIO,
-    SECTION_WATCHED,
 )
 
 SERIAL = "100000003d7c9f2b"

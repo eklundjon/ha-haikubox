@@ -3,12 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 
 import aiohttp
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -18,6 +17,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .audio_cache import AudioCache
 from .const import (
     ACTIVITY_BASELINE_DAYS,
     API_BASE,
@@ -60,7 +60,6 @@ from .const import (
     TRIGGER_UNUSUAL_VISITOR,
     TRIGGER_WATCHED_SPECIES,
 )
-from .audio_cache import AudioCache
 from .image_cache import ImageCache
 
 _LOGGER = logging.getLogger(__name__)
@@ -317,7 +316,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         recent_hours = self.config_entry.options.get(
             CONF_RECENT_WINDOW_HOURS, RECENT_WINDOW_HOURS
         )
-        recent_threshold = datetime.now(timezone.utc) - timedelta(hours=recent_hours)
+        recent_threshold = datetime.now(UTC) - timedelta(hours=recent_hours)
         recent_raw = {"detections": _filter_by_dt(daily_raw, recent_threshold)}
 
         # Map each species → its most-recent clip URL (a ~1h presigned FLAC).
@@ -474,7 +473,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ) / 100.0
         _apply_notability_scores(
             daily_count,
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
             NOTABILITY_WINDOW_HOURS,
             rarity_weight,
         )
@@ -645,7 +644,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             threshold_days = self.config_entry.options.get(
                 CONF_ABSENCE_DAYS, DEFAULT_ABSENCE_DAYS
             )
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for sp in current_recent - self._prev_recent_species:
                 if sp in newly_seen:
                     continue  # brand-new → already fired as new_species
@@ -1390,7 +1389,7 @@ def _parse_dt(value: Any) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -1493,7 +1492,7 @@ def _normalise_detections(raw: Any) -> list[dict[str, Any]]:
     # before we drop it.
     results = sorted(
         by_species.values(),
-        key=lambda x: x.get("_last_seen_dt") or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda x: x.get("_last_seen_dt") or datetime.min.replace(tzinfo=UTC),
         reverse=True,
     )
     for r in results:
@@ -1638,7 +1637,7 @@ def _apply_notability_scores(
                 dt = None
             if dt is not None:
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                    dt = dt.replace(tzinfo=UTC)
                 age_seconds = max(0.0, (now - dt).total_seconds())
                 recency = max(0.0, 1.0 - age_seconds / window_seconds)
         d["notability_score"] = round(
