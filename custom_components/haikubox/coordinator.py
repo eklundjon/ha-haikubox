@@ -137,6 +137,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Polls the Haikubox API and normalises the response for sensors."""
 
     def __init__(self, hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None:
+        serial = entry.data[CONF_SERIAL]
         # Poll interval is user-tunable (minutes); an options change reloads the
         # entry, so a new interval takes effect via this fresh coordinator.
         scan_minutes = entry.options.get(
@@ -145,11 +146,13 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
+            # Include the serial so coordinator log lines disambiguate which box
+            # they refer to when more than one Haikubox is configured.
+            name=f"{DOMAIN} {serial}",
             config_entry=entry,
             update_interval=timedelta(minutes=scan_minutes),
         )
-        self.serial = serial = entry.data[CONF_SERIAL]
+        self.serial = serial
         self.device_name = entry.data.get(CONF_DEVICE_NAME, "Haikubox")
         self._session = async_get_clientsession(hass)
         # The box's own timezone (from the box-info endpoint), resolved lazily
