@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
@@ -135,3 +136,30 @@ async def _async_options_updated(
 
 async def async_unload_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None:
+    """Clean up a removed box's on-disk state.
+
+    Removes this box's per-serial `.storage` files and its namespaced audio
+    cache (`config/www/haikubox/audio/<serial>/`) — both are box-specific, so
+    they're safe to delete regardless of other boxes. The image cache
+    (`config/www/haikubox/*.jpeg`) holds global Haikubox assets shared by every
+    box, so the whole tree is removed only once no Haikubox entries remain — by
+    the time this runs HA has already dropped the entry being removed, so an
+    empty list means it was the last.
+    """
+    serial = entry.data[CONF_SERIAL]
+    await HaikuboxCoordinator.async_remove_stores(hass, serial)
+
+    # Per-box audio cache. ignore_errors=True: the dir may not exist (audio
+    # never enabled) and a stray unremovable file shouldn't fail removal.
+    await hass.async_add_executor_job(
+        shutil.rmtree, AudioCache.dir_for(hass, serial), True
+    )
+
+    # Shared image cache (+ the now-orphaned audio parent): only wipe the whole
+    # tree when the last box is gone.
+    if not hass.config_entries.async_entries(DOMAIN):
+        cache_dir = Path(hass.config.path("www", "haikubox"))
+        await hass.async_add_executor_job(shutil.rmtree, cache_dir, True)
