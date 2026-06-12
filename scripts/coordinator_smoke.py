@@ -65,7 +65,6 @@ async def main() -> None:
     c._latest_wav_by_species = {}
     c._event_buffer = []
     c._prev_recent_species = None
-    c._stores_loaded = True
     for attr in ("_store", "_sp_codes_store", "_sci_names_store", "_last_seen_store",
                  "_daily_store", "_events_store"):
         setattr(c, attr, _FakeStore())

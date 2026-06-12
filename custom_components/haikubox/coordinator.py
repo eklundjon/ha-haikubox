@@ -179,7 +179,16 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the last 24 h", so it drains to unknown with its window.
         self._event_buffer: list[dict[str, Any]] = []
 
-        # Persistent stores
+        # Persistent stores. Kept as SEPARATE files on purpose — do NOT merge
+        # them into one combined store. Each is saved independently (gated by its
+        # own dirty flag), and they change at very different cadences: last_seen
+        # and recent_events on nearly every active poll, but daily_counts (the
+        # large, full-box-lifetime history) only ~once a day, and the lookup maps
+        # only when a new species appears. Combining them would rewrite the whole
+        # blob — including the big daily_counts — on every poll that touches the
+        # frequently-changing data, multiplying disk writes (flash/SD wear) for
+        # no functional gain. The current split keeps each write proportional to
+        # what actually changed. (See _STORE_SUFFIXES for the removal list.)
         self._store            = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.seen_species")
         self._sp_codes_store   = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sp_codes")
         self._sci_names_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sci_names")
@@ -198,7 +207,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._backfill_complete: bool = False            # reached the pre-install 404 floor
         self._backfill_cursor: str | None = None         # oldest date the deep backfill has probed
         self._backfill_misses: int = 0                   # consecutive 404s at the leading (oldest) edge
-        self._stores_loaded: bool = False
 
         # Automation-event edge detection. Species present in the recent
         # window on the previous poll — used to fire unusual_visitor only on
@@ -246,9 +254,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict[str, Any]:
-        if not self._stores_loaded:
-            await self._load_stores()
-
         # Anchor "today" to the box's OWN timezone, NOT UTC. The /daily-count
         # endpoint is keyed to the box's local calendar day, and the per-day
         # store, 7-day window, and once-per-day refresh should all turn over on
@@ -760,7 +765,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Store helpers
     # ------------------------------------------------------------------
 
-    async def _load_stores(self) -> None:
+    async def _async_setup(self) -> None:
+        """Load persisted stores and warm caches once, before the first poll.
+
+        This is DataUpdateCoordinator's setup hook (HA 2024.8+): it runs a
+        single time during async_config_entry_first_refresh, so no "loaded yet?"
+        guard or flag is needed in _async_update_data. A failure here surfaces
+        as ConfigEntryNotReady and is retried by HA.
+        """
         seen      = await self._store.async_load()
         sp_codes  = await self._sp_codes_store.async_load()
         sci_names = await self._sci_names_store.async_load()
@@ -807,7 +819,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The trailing-window baseline supersedes yearly/seven_day, and the
         # rolling event buffer + live notable replace the sticky store (#62);
         # all are orphaned now. async_remove no-ops if a file is already gone.
-        # Runs once per session (this method is gated by _stores_loaded).
+        # Runs once per session (this whole method is the one-time setup hook).
         for legacy in _LEGACY_STORE_SUFFIXES:
             await Store(
                 self.hass, _STORE_VERSION, f"{DOMAIN}.{self.serial}.{legacy}"
@@ -820,8 +832,6 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Preload the bundled eBird-code fallback map off the event loop, so
         # the synchronous _sp_code_for() lookups during a poll never touch disk.
         await _async_load_ebird_species(self.hass)
-
-        self._stores_loaded = True
 
     async def _ensure_daily_counts(self, today: date) -> bool:
         """Keep _daily_counts current and gap-free, then extend history.
