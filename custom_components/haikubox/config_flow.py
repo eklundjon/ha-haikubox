@@ -158,11 +158,11 @@ SECTION_ADVANCED = "advanced"
 
 
 class HaikuboxOptionsFlow(OptionsFlow):
-    """Per-entry options, single step with two collapsible sections.
+    """Per-entry options, single step with three collapsible sections.
 
     No __init__ — HA's flow manager sets `self.config_entry` for us when
     the flow is created. Assigning it ourselves errors on HA 2024.12+
-    (it became a read-only property), which is now our minimum.
+    (it became a read-only property); our 2025.4 minimum is well past that.
 
     Watched-species and audio settings live in collapsible sections (folded by
     default, auto-expanded when in use). Section fields arrive nested under the

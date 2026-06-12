@@ -236,7 +236,9 @@ Each rename is idempotent: if the old unique_id doesn't exist (fresh install or 
 
 ### Minimum HA version
 
-The integration's `hacs.json` pins a minimum of **Home Assistant 2024.12**. The 2024.12 release made `OptionsFlow.config_entry` a read-only property; the integration's options flow relies on the framework setting `self.config_entry` rather than assigning it from `__init__`. (Earlier HA releases used the explicit-assignment pattern, which now errors.) The sections-grid sizing API the cards depend on is also a 2024.12-era feature.
+The integration's `hacs.json` pins a minimum of **Home Assistant 2025.4**. The binding requirement is the recorder statistics API used by the long-term Statistics backfill ([`coordinator.py`](../custom_components/haikubox/coordinator.py) `_import_history_statistics`): `StatisticMeanType` and the `mean_type` field on `StatisticMetaData` landed in **2025.4.0**. On older cores the lazy import would raise `ImportError` and fail every poll, so the floor is real, not cosmetic. (We also pass `unit_class=None`, which only became a defined `StatisticMetaData` field in 2025.11 but is a harmless extra key before then — the recorder reads only the keys it knows.)
+
+Two earlier requirements are subsumed by that floor: 2024.12 made `OptionsFlow.config_entry` a read-only property (the options flow relies on the framework setting `self.config_entry` rather than assigning it from `__init__`), and the sections-grid sizing API the cards use is also a 2024.12-era feature.
 
 ## Custom cards
 

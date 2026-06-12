@@ -9,7 +9,7 @@ The integration registers two custom Lovelace cards automatically — no manual 
 - [Theming](#theming) — CSS variables both cards honour
 - [Troubleshooting](#troubleshooting) — common questions
 
-Both cards require **Home Assistant 2024.12+** (the integration's minimum; the cards rely on the sections grid sizing API and modern container queries).
+Both cards work on **Home Assistant 2025.4+** (the integration's minimum; the cards themselves only need the sections grid sizing API and modern container queries, which have been available since 2024.12).
 
 ---
 
