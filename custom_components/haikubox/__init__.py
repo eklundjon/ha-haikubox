@@ -75,10 +75,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> 
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
-    # Refresh immediately when the user adjusts options (e.g. notability
-    # weight). Without this they'd wait up to 10 minutes for the next
-    # scheduled poll to see the slider take effect. The coordinator reads
-    # the live options dict on each poll, so no other plumbing is needed.
+    # Reload the entry when the user adjusts options. Some options are read
+    # once in the coordinator's __init__ (poll interval -> update_interval,
+    # audio enabled, normalization target), so a bare refresh wouldn't pick
+    # them up until a restart. A reload re-runs setup — rebuilding the
+    # coordinator and re-polling — so every option (the notability slider, the
+    # Advanced windows, the poll interval, the audio toggle) takes effect
+    # immediately instead of waiting for the next scheduled poll.
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -87,8 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> 
 async def _async_options_updated(
     hass: HomeAssistant, entry: HaikuboxConfigEntry
 ) -> None:
-    coordinator: HaikuboxCoordinator = entry.runtime_data
-    await coordinator.async_request_refresh()
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> bool:
