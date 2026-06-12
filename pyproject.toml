@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Run async tests without per-test @pytest.mark.asyncio decorators.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Make `custom_components.haikubox` importable from the repo root.
+pythonpath = ["."]
