@@ -202,6 +202,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._audio = AudioCache(
             hass,
             self._session,
+            self.serial,
             _ffmpeg_binary(hass),
             entry.options.get(CONF_AUDIO_NORM_TARGET, DEFAULT_AUDIO_NORM_TARGET),
         )

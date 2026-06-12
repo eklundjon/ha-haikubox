@@ -34,20 +34,32 @@ class AudioCache:
     changes every fetch, the path doesn't), so the same detection maps to the
     same cached file across polls. Bounded by a retention window + a hard cap;
     an in-memory index of cached ids avoids re-downloading.
+
+    Clips are namespaced per box under `audio/<serial>/`, so each box's
+    retention window and clip cap are independent and removing one box's cache
+    never disturbs another's (unlike the image cache, which holds global
+    Haikubox assets shared across boxes).
     """
+
+    @staticmethod
+    def dir_for(hass: HomeAssistant, serial: str) -> Path:
+        """The per-box audio cache directory (`www/haikubox/audio/<serial>`)."""
+        return Path(hass.config.path("www", "haikubox", "audio", serial))
 
     def __init__(
         self,
         hass: HomeAssistant,
         session: aiohttp.ClientSession,
+        serial: str,
         ffmpeg_bin: str | None = None,
         norm_target_db: float = DEFAULT_AUDIO_NORM_TARGET,
     ) -> None:
         self._hass = hass
         self._session = session
+        self._serial = serial
         self._ffmpeg = ffmpeg_bin
         self._norm_target = norm_target_db
-        self._dir: Path = Path(hass.config.path("www", "haikubox", "audio"))
+        self._dir: Path = self.dir_for(hass, serial)
         self._cached: set[str] = set()
         # Clips found to have no real signal (peak < AUDIO_SILENCE_FLOOR_DB) —
         # remembered so we don't re-download them every poll. Not persisted, so a
@@ -79,7 +91,7 @@ class AudioCache:
         """
         cid = self.clip_id(wav_url)
         if cid and cid in self._cached:
-            return f"/local/haikubox/audio/{cid}.flac"
+            return f"/local/haikubox/audio/{self._serial}/{cid}.flac"
         return None
 
     async def async_fetch(self, wav_url: str | None) -> str | None:
@@ -88,7 +100,7 @@ class AudioCache:
         if not cid:
             return None
         if cid in self._cached:
-            return f"/local/haikubox/audio/{cid}.flac"
+            return f"/local/haikubox/audio/{self._serial}/{cid}.flac"
         if cid in self._silent:
             return None  # known to have no real signal; don't re-download
         try:
@@ -113,7 +125,7 @@ class AudioCache:
                 return None
             await self._normalize(path, peak)
         self._cached.add(cid)
-        return f"/local/haikubox/audio/{cid}.flac"
+        return f"/local/haikubox/audio/{self._serial}/{cid}.flac"
 
     async def _normalize(self, path: Path, peak: float | None) -> None:
         """Peak-normalize a freshly cached clip in place (best-effort).
