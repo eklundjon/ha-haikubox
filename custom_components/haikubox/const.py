@@ -124,7 +124,9 @@ DEFAULT_ABSENCE_DAYS = 30
 # Detection-audio cache. /detections carries a per-detection `wav` (a short FLAC)
 # as an AWS presigned URL that expires in ~1 hour, so to make "play the call"
 # robust (survive expiry + restarts, and keep the signed URL out of HA state) we
-# download clips to config/www/haikubox/audio/ and serve stable /local/ paths.
+# download clips to config/www/haikubox/audio/<serial>/ (namespaced per box, so
+# each box's retention window and clip cap are independent, and removing one
+# box's cache never touches another's) and serve stable /local/ paths.
 #
 # Two tiers, to stay gentle on Haikubox's API by default:
 #   * HEADLINE — always on: only the headline records (last + notable detection),

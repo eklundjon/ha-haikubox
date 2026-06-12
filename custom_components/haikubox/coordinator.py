@@ -67,6 +67,21 @@ _LOGGER = logging.getLogger(__name__)
 
 _STORE_VERSION = 1
 
+# Per-box .storage suffixes (each file is `haikubox.<serial>.<suffix>`). The
+# current set must mirror the Store(...) constructors in __init__; the legacy
+# set is the orphaned stores earlier versions wrote. Both are removed when the
+# entry is removed (async_remove_stores); the legacy set is also cleaned up
+# once per session at load.
+_STORE_SUFFIXES = (
+    "seen_species",
+    "sp_codes",
+    "sci_names",
+    "last_seen",
+    "daily_counts",
+    "recent_events",
+)
+_LEGACY_STORE_SUFFIXES = ("yearly", "seven_day", "sticky")
+
 # Config entry whose runtime_data is the coordinator (lazily evaluated,
 # so the forward reference to the class below is fine).
 type HaikuboxConfigEntry = ConfigEntry[HaikuboxCoordinator]
@@ -202,6 +217,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._audio = AudioCache(
             hass,
             self._session,
+            self.serial,
             _ffmpeg_binary(hass),
             entry.options.get(CONF_AUDIO_NORM_TARGET, DEFAULT_AUDIO_NORM_TARGET),
         )
@@ -210,6 +226,20 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         # Per-poll map: species code → its most-recent clip URL (for audio resolve)
         self._latest_wav_by_species: dict[str, str] = {}
+
+    @staticmethod
+    async def async_remove_stores(hass: HomeAssistant, serial: str) -> None:
+        """Delete this box's persistent .storage files (current + legacy).
+
+        Called from async_remove_entry when the integration entry is removed.
+        Store.async_remove() no-ops if a file is already gone. The shared image
+        cache under config/www/haikubox/ is NOT touched here — it's keyed by
+        species code, not serial, so it's cleaned up only when the last box
+        goes away (see __init__.async_remove_entry)."""
+        for suffix in (*_STORE_SUFFIXES, *_LEGACY_STORE_SUFFIXES):
+            await Store(
+                hass, _STORE_VERSION, f"{DOMAIN}.{serial}.{suffix}"
+            ).async_remove()
 
     # ------------------------------------------------------------------
     # DataUpdateCoordinator interface
@@ -778,7 +808,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # rolling event buffer + live notable replace the sticky store (#62);
         # all are orphaned now. async_remove no-ops if a file is already gone.
         # Runs once per session (this method is gated by _stores_loaded).
-        for legacy in ("yearly", "seven_day", "sticky"):
+        for legacy in _LEGACY_STORE_SUFFIXES:
             await Store(
                 self.hass, _STORE_VERSION, f"{DOMAIN}.{self.serial}.{legacy}"
             ).async_remove()

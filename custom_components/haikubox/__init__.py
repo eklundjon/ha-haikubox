@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
@@ -8,7 +9,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.loader import async_get_integration
 
-from .const import CONF_SERIAL, DOMAIN
+from .audio_cache import AudioCache
+from .const import CONF_AUDIO_ENABLED, CONF_SERIAL, DEFAULT_AUDIO_ENABLED, DOMAIN
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -69,8 +71,47 @@ def _migrate_unique_ids(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None
         registry.async_update_entity(entity_id, new_unique_id=new_uid)
 
 
+async def _migrate_flat_audio_cache(
+    hass: HomeAssistant, entry: HaikuboxConfigEntry
+) -> None:
+    """One-time relocation of 0.7's flat audio cache into the per-serial layout.
+
+    0.7 cached "play the call" clips flat in `www/haikubox/audio/*.flac`; clips
+    are now namespaced under `audio/<serial>/`. The flat dir mixed clips from
+    every box with no way to attribute one to a serial, so the first box with
+    audio ENABLED to set up claims them all into its own subdir — some
+    preservation beats none. Clips that actually belonged to another box are
+    harmless there: that box re-caches its own on the next poll, and the
+    misattributed copies age out of this box's retention window on the next
+    prune. A box with audio disabled leaves the flat clips for an audio-enabled
+    box (it never prunes, so it shouldn't hoard them); enabling audio later
+    reloads the entry and re-runs this, claiming them then. Idempotent — a no-op
+    once the flat dir holds no loose clips.
+    """
+    if not entry.options.get(CONF_AUDIO_ENABLED, DEFAULT_AUDIO_ENABLED):
+        return
+    dest = AudioCache.dir_for(hass, entry.data[CONF_SERIAL])
+    await hass.async_add_executor_job(_relocate_flat_audio, hass, dest)
+
+
+def _relocate_flat_audio(hass: HomeAssistant, dest: Path) -> None:
+    root = Path(hass.config.path("www", "haikubox", "audio"))
+    # glob("*.flac") matches only loose files in the root, not the per-serial
+    # subdirs, so this naturally no-ops once migration has run.
+    flat = list(root.glob("*.flac")) if root.is_dir() else []
+    if not flat:
+        return
+    dest.mkdir(parents=True, exist_ok=True)
+    for p in flat:
+        try:
+            p.rename(dest / p.name)
+        except OSError:
+            pass
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> bool:
     _migrate_unique_ids(hass, entry)
+    await _migrate_flat_audio_cache(hass, entry)
     coordinator = HaikuboxCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
@@ -95,3 +136,30 @@ async def _async_options_updated(
 
 async def async_unload_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) -> None:
+    """Clean up a removed box's on-disk state.
+
+    Removes this box's per-serial `.storage` files and its namespaced audio
+    cache (`config/www/haikubox/audio/<serial>/`) — both are box-specific, so
+    they're safe to delete regardless of other boxes. The image cache
+    (`config/www/haikubox/*.jpeg`) holds global Haikubox assets shared by every
+    box, so the whole tree is removed only once no Haikubox entries remain — by
+    the time this runs HA has already dropped the entry being removed, so an
+    empty list means it was the last.
+    """
+    serial = entry.data[CONF_SERIAL]
+    await HaikuboxCoordinator.async_remove_stores(hass, serial)
+
+    # Per-box audio cache. ignore_errors=True: the dir may not exist (audio
+    # never enabled) and a stray unremovable file shouldn't fail removal.
+    await hass.async_add_executor_job(
+        shutil.rmtree, AudioCache.dir_for(hass, serial), True
+    )
+
+    # Shared image cache (+ the now-orphaned audio parent): only wipe the whole
+    # tree when the last box is gone.
+    if not hass.config_entries.async_entries(DOMAIN):
+        cache_dir = Path(hass.config.path("www", "haikubox"))
+        await hass.async_add_executor_job(shutil.rmtree, cache_dir, True)
