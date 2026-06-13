@@ -17,10 +17,10 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .api import HaikuboxApiClient
 from .audio_cache import AudioCache
 from .const import (
     ACTIVITY_BASELINE_DAYS,
-    API_BASE,
     BACKFILL_REQUEST_DELAY,
     BACKFILL_STOP_AFTER_404,
     CONF_ABSENCE_DAYS,
@@ -176,11 +176,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.serial = serial
         self.device_name = entry.data.get(CONF_DEVICE_NAME, "Haikubox")
         self._session = async_get_clientsession(hass)
-        # The box's own timezone (from the box-info endpoint), resolved lazily
-        # on the first poll and cached. /daily-count is keyed to the box's local
-        # calendar day, so day-boundary math must use the box's tz — the box may
-        # sit in a different timezone than the Home Assistant host.
-        self._box_tz: tzinfo | None = None
+        # All HTTP to the Haikubox API goes through this client (detections,
+        # daily counts, and the box timezone — resolved lazily and cached there;
+        # /daily-count is keyed to the box's local day, which may differ from the
+        # HA host's).
+        self._api = HaikuboxApiClient(self._session, serial)
 
         # Rarity baseline — a trailing RARITY_WINDOW_DAYS aggregate over the
         # per-day counts, rebuilt every poll (cheap). The `yearly_*` data keys /
@@ -1247,7 +1247,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def box_timezone(self) -> tzinfo | None:
         """The box's resolved timezone, or None until the first poll resolves
         it (callers fall back to HA's tz via dt_util)."""
-        return self._box_tz
+        return self._api.box_tz
 
     @property
     def lifetime_species_count(self) -> int:
@@ -1268,59 +1268,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # HTTP helpers
     # ------------------------------------------------------------------
 
+    # Thin bindings to the API client (kept as methods so a poll's network can
+    # be stubbed per-instance in tests; the HTTP logic lives in api.py).
     async def _async_box_tz(self) -> tzinfo | None:
-        """The box's own timezone, from the box-info endpoint (cached).
-
-        Resolved once and reused. Returns ``None`` until the lookup succeeds, in
-        which case callers fall back to Home Assistant's configured tz via
-        ``dt_util.now(None)``. Day-boundary math needs the *box's* local day
-        because /daily-count is keyed to it, and the box can live in a different
-        timezone than the HA host.
-        """
-        if self._box_tz is not None:
-            return self._box_tz
-        try:
-            async with self._session.get(f"{API_BASE}/haikubox/{self.serial}") as resp:
-                resp.raise_for_status()
-                info = await resp.json()
-            name = (info or {}).get("tz")
-            if name:
-                self._box_tz = await dt_util.async_get_time_zone(name)
-        except (aiohttp.ClientError, ValueError) as err:
-            _LOGGER.debug("Could not resolve box timezone (falling back to HA tz): %s", err)
-        return self._box_tz
+        return await self._api.async_box_tz()
 
     async def _fetch_detections(self, hours: int) -> Any:
-        url = f"{API_BASE}/haikubox/{self.serial}/detections"
-        async with self._session.get(url, params={"hours": hours}) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+        return await self._api.fetch_detections(hours)
 
     async def _fetch_daily_count(self, date_str: str) -> dict[str, int] | None:
-        """One calendar day's per-species counts as {species: count}.
-
-        Returns **None only for a 404** — a date before the box existed, the
-        backfill floor signal. A 200 with an empty or unparseable body returns
-        `{}` ("the day exists, just no data"), which the backfill treats as a
-        recorded no-data day rather than a floor hit. This distinction is what
-        lets an in-history outage gap (offline days) be told apart from the
-        pre-install void.
-        """
-        url = f"{API_BASE}/haikubox/{self.serial}/daily-count"
-        async with self._session.get(url, params={"date": date_str}) as resp:
-            if resp.status == 404:
-                return None
-            resp.raise_for_status()
-            try:
-                data = await resp.json(content_type=None)
-            except (aiohttp.ContentTypeError, ValueError):
-                return {}
-        if not isinstance(data, list):
-            return {}
-        out: dict[str, int] = {}
-        for item in data:
-            if isinstance(item, dict) and item.get("bird"):
-                out[item["bird"]] = int(item.get("count") or 0)
-        return out
+        return await self._api.fetch_daily_count(date_str)
 
 

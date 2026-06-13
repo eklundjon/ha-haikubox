@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -10,9 +9,8 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -26,8 +24,8 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
 )
 
+from .api import CannotConnect, async_get_device_info
 from .const import (
-    API_BASE,
     CONF_ABSENCE_DAYS,
     CONF_AUDIO_CACHE_DAYS,
     CONF_AUDIO_ENABLED,
@@ -66,30 +64,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 _LISTEN_URL = "https://listen.haikubox.com"
 
 
-class _CannotConnect(Exception):
-    """The Haikubox API could not be reached (network/transport failure)."""
-
-
-async def _get_device_info(hass: HomeAssistant, serial: str) -> dict | None:
-    """Fetch the box's device info from the API.
-
-    Returns the info dict for a valid, shared box. Returns ``None`` when the API
-    answers but rejects the serial — an unknown serial, or a box that isn't
-    shared — which the caller surfaces as ``invalid_serial``. Raises
-    ``_CannotConnect`` on a network/transport failure (no answer at all), which
-    the caller surfaces as ``cannot_connect``. Distinguishing the two tells the
-    user whether to fix their serial/sharing or check their connection.
-    """
-    session = async_get_clientsession(hass)
-    try:
-        async with session.get(f"{API_BASE}/haikubox/{serial}") as resp:
-            if resp.status != 200:
-                return None
-            return await resp.json()
-    except aiohttp.ClientError as err:
-        raise _CannotConnect from err
-
-
 class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Haikubox."""
 
@@ -112,8 +86,8 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             try:
-                device = await _get_device_info(self.hass, serial)
-            except _CannotConnect:
+                device = await async_get_device_info(self.hass, serial)
+            except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
                 if device is None:
@@ -144,8 +118,8 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_mismatch()
 
             try:
-                device = await _get_device_info(self.hass, serial)
-            except _CannotConnect:
+                device = await async_get_device_info(self.hass, serial)
+            except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
                 if device is None:
