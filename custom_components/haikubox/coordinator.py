@@ -126,7 +126,12 @@ def _ffmpeg_binary(hass: HomeAssistant) -> str | None:
         from homeassistant.components.ffmpeg import get_ffmpeg_manager
 
         return get_ffmpeg_manager(hass).binary
-    except (KeyError, HomeAssistantError, ImportError):
+    except (KeyError, HomeAssistantError, ImportError, ValueError):
+        # ValueError: get_ffmpeg_manager raises it when the ffmpeg component
+        # isn't set up. ffmpeg is only an after-dependency (not forced), so on
+        # a minimal install without it this is reached — fall back to PATH and,
+        # failing that, None, rather than letting the whole coordinator fail to
+        # construct.
         from shutil import which
 
         return which("ffmpeg")
