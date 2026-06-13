@@ -11,6 +11,7 @@
 #     .venv-test/bin/python -m pytest
 #
 pytest-homeassistant-custom-component
+pytest-cov
 
 # The integration's own runtime requirement (manifest.json) — needed so the
 # test environment can import the package.
