@@ -47,6 +47,8 @@ jobs:
           pip install -r requirements_test.txt
 
       - name: Run tests
-        # Coverage is reported (term-missing) but not gated — no --cov-fail-under
-        # yet, while the suite is still being built out.
-        run: pytest --cov=custom_components.haikubox --cov-report=term-missing
+        # Gate on coverage. The floor sits a couple points below the current
+        # ~86% so a trivial change doesn't trip it; ratchet it up over time.
+        run: >-
+          pytest --cov=custom_components.haikubox --cov-report=term-missing
+          --cov-fail-under=84
