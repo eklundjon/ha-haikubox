@@ -1,10 +1,15 @@
 # Troubleshooting
 
-## Config flow rejects the serial number with "Could not reach the Haikubox API"
+## Config flow rejects the serial number
 
-The integration calls `GET https://api.haikubox.com/haikubox/<serial>` to validate your serial during setup. The endpoint returns device info for *publicly shareable* boxes and `Invalid Haikubox.` (HTTP non-200) for everything else — the integration surfaces both kinds of non-200 as the generic *"Could not reach the Haikubox API — check your serial number"* error.
+The integration calls `GET https://api.haikubox.com/haikubox/<serial>` to validate your serial during setup, and the error message tells you which kind of failure it was:
 
-Two common causes:
+- **"No shared Haikubox found for that serial..."** — the API answered but rejected the lookup (a wrong serial, or a box that isn't shared). This is the common case; the two causes below cover it.
+- **"Could not reach the Haikubox API. Check your internet connection..."** — the request never got an answer at all (a network/transport failure). That points at connectivity on the HA host, not your serial or sharing setting.
+
+The endpoint returns device info for *publicly shareable* boxes and an HTTP non-200 for everything else, so any non-200 becomes the "No shared Haikubox found" message and only a true transport error becomes "Could not reach the Haikubox API."
+
+Two common causes of the "No shared Haikubox found" rejection:
 
 1. **Wrong serial.** The serial is a hexadecimal code whose length varies by model (e.g. `100000003d7c9f2b`). The reliable place to read it is your public URL, shown once sharing is enabled (see below) — `https://birds.haikubox.com/listen/<serial>`. Some units also have it printed on the base, but newer ones may not.
 
