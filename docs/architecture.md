@@ -17,13 +17,17 @@ graph TB
     end
 
     subgraph Runtime
-        Coord["coordinator.py<br/>HaikuboxCoordinator"]
+        Coord["coordinator.py<br/>HaikuboxCoordinator (orchestration)"]
+        Api["api.py<br/>HaikuboxApiClient (all HTTP)"]
+        Normalize["normalize.py<br/>parse / score / link helpers"]
+        Stats["statistics.py<br/>long-term-statistics backfill"]
         Images["image_cache.py<br/>ImageCache"]
-        Const["const.py<br/>endpoints + intervals"]
+        Audio["audio_cache.py<br/>AudioCache"]
+        Const["const.py<br/>conf keys + tuning constants"]
     end
 
     subgraph User-facing
-        Sensors["sensor.py + binary_sensor.py<br/>14 sensors + 1 binary sensor"]
+        Sensors["sensor.py + binary_sensor.py<br/>14 sensors + 1 binary sensor<br/>(entity.py: shared base)"]
         Cards["www/*.js<br/>bird-card + bird-list-card"]
         Diag["diagnostics.py<br/>redacted bundle"]
     end
@@ -35,15 +39,20 @@ graph TB
         WWW["config/haikubox/<br/>cached photos + audio"]
     end
 
-    ConfigFlow -- "validates serial" --> API
+    ConfigFlow -- "validates serial (api.py)" --> API
     InitMod -- "registers" --> Cards
     InitMod -- "constructs" --> Coord
-    Coord -- "fetches" --> API
+    Coord -- "fetches via" --> Api
+    Coord -- "transforms with" --> Normalize
+    Coord -- "backfills via" --> Stats
     Coord -- "uses" --> Images
+    Coord -- "uses" --> Audio
     Coord -- "reads constants" --> Const
     Coord -- "persists + rehydrates" --> HAStore
+    Api -- "GET" --> API
     Images -- "fetches" --> S3
-    Images -- "writes" --> WWW
+    Audio -- "fetches clips" --> API
+    Images & Audio -- "write" --> WWW
     Sensors -- "reads coordinator.data" --> Coord
     Cards -- "reads state + attrs" --> Sensors
     Diag -- "snapshots" --> Coord
@@ -53,44 +62,55 @@ graph TB
 
 ```text
 custom_components/haikubox/
-├── __init__.py           # setup + teardown; migration shim; card registration
-├── binary_sensor.py      # detection-problem binary sensor
+├── __init__.py           # setup + teardown; migration shims; cache static path + card registration
+├── api.py                # HaikuboxApiClient (all HTTP) + the config-flow device probe
+├── audio_cache.py        # AudioCache: download / normalize / prune detection clips
+├── binary_sensor.py      # extended-silence problem binary sensor
 ├── config_flow.py        # config flow (initial + reconfigure) + options flow
-├── const.py              # domain, conf keys, API base URLs, intervals, event/trigger names
-├── coordinator.py        # HaikuboxCoordinator + helpers (the brains)
-├── device_trigger.py     # new_species / unusual_visitor device triggers
+├── const.py              # domain, conf keys, tuning constants, event/trigger names
+├── coordinator.py        # HaikuboxCoordinator: the poll orchestration (the brains)
+├── device_trigger.py     # new_species / unusual_visitor / watched_species device triggers
 ├── diagnostics.py        # redacted state dump
-├── image_cache.py        # ImageCache class
+├── entity.py             # HaikuboxEntity: shared device-info base for the platforms
+├── image_cache.py        # ImageCache: download species photos once, serve locally
 ├── manifest.json         # HACS manifest (version stamped on release)
+├── normalize.py          # pure response parsing, rarity/notability scoring, link URLs
 ├── sensor.py             # 14 sensor classes
+├── statistics.py         # long-term-statistics backfill (recorder external statistics)
 ├── strings.json          # translation keys → display names
 ├── translations/
 │   └── en.json
-├── brand/
-│   ├── icon.png          # 256×256, HA-2026.3+ proxy serves this
-│   └── icon@2x.png       # 512×512
+├── data/                 # bundled eBird common-name → code/scientific-name map (+ NOTICE)
+├── brand/                # logo/icon (also submitted to home-assistant/brands)
 └── www/
     ├── haikubox-bird-card.js     # single-bird card (registered via static path)
     └── haikubox-details-card.js  # ranked list card
 ```
 
-## The coordinator is the centre of gravity
+## The coordinator orchestrates; supporting modules do the work
 
-Everything interesting happens in [`coordinator.py`](../custom_components/haikubox/coordinator.py). The integration is deliberately thin elsewhere:
+The poll orchestration lives in [`coordinator.py`](../custom_components/haikubox/coordinator.py) — it sequences a poll, holds the in-memory/persisted state, and builds the output dict. The reusable, stateless pieces have been pulled into their own modules, which the coordinator imports:
 
-- **Sensors** are dumb projections — `native_value` and `extra_state_attributes` just read from `self.coordinator.data`. No sensor ever calls the API, holds state, or does work. `PARALLEL_UPDATES = 0` because they all read the same in-memory dict; HA's parallelism guard isn't relevant.
-- **The config flow** validates a serial and stores it. It doesn't talk to the coordinator at all — once the entry exists, `async_setup_entry` is HA's responsibility and it constructs the coordinator from `entry.data`.
-- **`__init__.py`** is mostly registration boilerplate (static paths for card JS, the migration shim, forward to the sensor platform).
-- **`image_cache.py`** is the only other piece that touches the network, and it's a single-purpose write-once cache.
+- **`api.py`** — `HaikuboxApiClient` owns *all* HTTP to api.haikubox.com (detections, daily counts, the box timezone). It also has `async_get_device_info` (the config-flow setup probe) and `CannotConnect`, so every network call is in one place. The coordinator keeps thin `_fetch_*` / `_async_box_tz` methods that delegate to the client (so a poll's network can be stubbed per-instance in tests).
+- **`normalize.py`** — pure functions: dt parsing, the recent-window filter, per-species normalisation, rank / rarity / notability scoring, and the reference-link URL builders. No coordinator or HA state.
+- **`statistics.py`** — the long-term-statistics backfill (`async_import_history_statistics`); the recorder imports stay lazy inside it.
+- **`image_cache.py`** / **`audio_cache.py`** — write-once photo cache and the (opt-in) detection-clip cache.
+
+The integration is deliberately thin elsewhere too:
+
+- **Sensors** are dumb projections — `native_value` and `extra_state_attributes` just read from `self.coordinator.data`. No sensor ever calls the API, holds state, or does work. `PARALLEL_UPDATES = 0` because they all read the same in-memory dict; HA's parallelism guard isn't relevant. (They share a small device-info base in `entity.py`.)
+- **The config flow** validates a serial (via `api.async_get_device_info`) and stores it. It doesn't talk to the coordinator at all — once the entry exists, `async_setup_entry` is HA's responsibility and it constructs the coordinator from `entry.data`.
+- **`__init__.py`** is mostly registration boilerplate (the cache static path + card JS, the migration shims, forward to the sensor + binary-sensor platforms).
 
 ### Inside `_async_update_data`
 
+The one-time store load + cache warm runs earlier, in `_async_setup` (HA's
+DataUpdateCoordinator setup hook, invoked once before the first refresh), so the
+poll body below has no "loaded yet?" guard.
+
 ```mermaid
 flowchart TD
-    Start([poll fires every 10 min]) --> LoadStores{stores loaded?}
-    LoadStores -- no --> Load[load 6 .storage files<br/>rehydrate stickies;<br/>rebuild baseline]
-    LoadStores -- yes --> EnsureDaily
-    Load --> EnsureDaily
+    Start([poll fires every 10 min]) --> EnsureDaily
 
     EnsureDaily[_ensure_daily_counts<br/>new completed day + backfill chunk<br/>via /daily-count?date] --> Rebuild[_rebuild_baseline<br/>aggregate trailing 365d<br/>→ rank lookup]
     Rebuild --> FetchDetections
@@ -153,12 +173,12 @@ Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `da
 
 | Field | Persisted as | Rehydrated by |
 |---|---|---|
-| `_seen_species: dict[str, str]` | `haikubox.<serial>.seen_species` | `_load_stores` |
-| `_sp_codes: dict[str, str]` | `haikubox.<serial>.sp_codes` | `_load_stores` |
-| `_sci_names: dict[str, str]` | `haikubox.<serial>.sci_names` | `_load_stores` |
-| `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_load_stores` |
-| `_daily_counts: dict[str, dict[str, int]]` (full lifetime) — the derived `_baseline_ranks` / `_baseline_species_count` / `_baseline_items` are rebuilt from its trailing window | `haikubox.<serial>.daily_counts` | `_load_stores` (baseline rebuilt at load) |
-| `_event_buffer: list[dict]` (rolling last-50 events; backs `last_detection`) | `haikubox.<serial>.recent_events` | `_load_stores` |
+| `_seen_species: dict[str, str]` | `haikubox.<serial>.seen_species` | `_async_setup` |
+| `_sp_codes: dict[str, str]` | `haikubox.<serial>.sp_codes` | `_async_setup` |
+| `_sci_names: dict[str, str]` | `haikubox.<serial>.sci_names` | `_async_setup` |
+| `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_async_setup` |
+| `_daily_counts: dict[str, dict[str, int]]` (full lifetime) — the derived `_baseline_ranks` / `_baseline_species_count` / `_baseline_items` are rebuilt from its trailing window | `haikubox.<serial>.daily_counts` | `_async_setup` (baseline rebuilt at load) |
+| `_event_buffer: list[dict]` (rolling last-50 events; backs `last_detection`) | `haikubox.<serial>.recent_events` | `_async_setup` |
 
 Each store is written **only when its data changes**, gated by a dirty flag. The event buffer, for example, only writes when a poll actually adds a new event — not on every poll.
 
@@ -193,7 +213,7 @@ sequenceDiagram
     Init->>Init: _migrate_unique_ids (idempotent)
     Init->>Coord: construct(hass, entry)
     Init->>Coord: async_config_entry_first_refresh()
-    Coord->>Coord: _load_stores + first poll
+    Coord->>Coord: _async_setup (load + warm) + first poll
     Init->>HA: entry.add_update_listener(_async_options_updated)
     Init->>HA: forward to sensor + binary_sensor platforms
     HA->>Sensor: async_setup_entry(entry)
@@ -236,7 +256,7 @@ Each rename is idempotent: if the old unique_id doesn't exist (fresh install or 
 
 ### Minimum HA version
 
-The integration's `hacs.json` pins a minimum of **Home Assistant 2025.4**. The binding requirement is the recorder statistics API used by the long-term Statistics backfill ([`coordinator.py`](../custom_components/haikubox/coordinator.py) `_import_history_statistics`): `StatisticMeanType` and the `mean_type` field on `StatisticMetaData` landed in **2025.4.0**. On older cores the lazy import would raise `ImportError` and fail every poll, so the floor is real, not cosmetic. (We also pass `unit_class=None`, which only became a defined `StatisticMetaData` field in 2025.11 but is a harmless extra key before then — the recorder reads only the keys it knows.)
+The integration's `hacs.json` pins a minimum of **Home Assistant 2025.4**. The binding requirement is the recorder statistics API used by the long-term Statistics backfill ([`statistics.py`](../custom_components/haikubox/statistics.py) `async_import_history_statistics`, called via the coordinator's thin `_import_history_statistics` wrapper): `StatisticMeanType` and the `mean_type` field on `StatisticMetaData` landed in **2025.4.0**. On older cores the lazy import would raise `ImportError` and fail every poll, so the floor is real, not cosmetic. (We also pass `unit_class=None`, which only became a defined `StatisticMetaData` field in 2025.11 but is a harmless extra key before then — the recorder reads only the keys it knows.)
 
 Two earlier requirements are subsumed by that floor: 2024.12 made `OptionsFlow.config_entry` a read-only property (the options flow relies on the framework setting `self.config_entry` rather than assigning it from `__init__`), and the sections-grid sizing API the cards use is also a 2024.12-era feature.
 
@@ -297,7 +317,7 @@ URL — see [docs/automations.md](automations.md).
 
 ## Design choices worth knowing
 
-- **Single coordinator, all entities.** Every sensor and the binary sensor share one `DataUpdateCoordinator`. Updating any one entity refreshes them all — useful for the "custom polling cadence" pattern described in [docs/advanced.md](advanced.md). Both new entities read keys the coordinator already produces (`lifetime_species_count`, `daily_count`), so the data-dict contract is unchanged.
+- **Single coordinator, all entities.** Every sensor and the binary sensor share one `DataUpdateCoordinator`. Updating any one entity refreshes them all — useful for the "custom polling cadence" pattern described in [docs/advanced.md](advanced.md). Every entity reads only keys the coordinator already produces, so adding an entity never changes the data-dict contract.
 - **`_unrecorded_attributes = {"detections"}`** on every sensor. The `detections` lists can run to 50+ records with images and metadata; persisting them on every state change would bloat the recorder DB and trip HA's state-attribute size warnings. The lists stay on the live state object for cards to read.
 - **Idempotent migration on every setup.** The shim doesn't track "has migration run" — it just checks the registry. Cheap, no version flag to maintain, no chance of getting out of sync.
 - **24-hour bootstrap for `_seen_species`.** A fresh install seeds the lifetime first-seen log from the 24-hour window we already fetch every poll, so `new_species`/`new_detections` populate on poll 1 rather than treating every species as newly-discovered — see [docs/sensors.md](sensors.md) for the user-visible effect. (`last_detection` needs no bootstrap — its event buffer fills from poll 1's `/detections`; `notable_species` is live.)

@@ -57,7 +57,7 @@ Click the badge to open HACS in your Home Assistant with this repository pre-fil
 
 The integration will verify the serial against the Haikubox API and create a device named after your box (e.g. "Bird Shazam"). A set of sensors (plus an "extended silence" binary sensor) appears under that device — see [docs/sensors.md](docs/sensors.md) for the full list.
 
-If setup fails with *"Could not reach the Haikubox API"*, double-check both: the serial is correct, and sharing is enabled. More in [docs/troubleshooting.md](docs/troubleshooting.md).
+If setup fails with *"No shared Haikubox found for that serial"*, double-check both: the serial is correct, and sharing is enabled. (*"Could not reach the Haikubox API"* instead means a connectivity problem on the HA host.) More in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### Add a card
 
@@ -95,6 +95,7 @@ entities:
 | First-install backfill timing, restart behaviour, card-cache issues, 0.3.x → 0.4.x upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Haikubox API endpoints, polling, image CDN, failure modes | [docs/api.md](docs/api.md) |
 | Module map, data flow, persistence, lifecycle, custom-card registration | [docs/architecture.md](docs/architecture.md) |
+| Local dev setup, running the test suite, the CI matrix, the refactor smoke harness | [docs/contributing.md](docs/contributing.md) |
 
 ## Attribution & data licensing
 
