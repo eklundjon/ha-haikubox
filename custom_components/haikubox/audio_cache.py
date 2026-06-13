@@ -70,7 +70,19 @@ class AudioCache:
         self._silent: set[str] = set()
 
     async def async_init(self) -> None:
-        """Create the cache dir and index existing files (one executor hop)."""
+        """Create the cache dir and index existing files (one executor hop).
+
+        Only called when audio is enabled, so this is also where we warn if
+        ffmpeg is unavailable — otherwise the degradation (no normalization, no
+        silence filtering) is silent and a user just hears quiet/empty clips.
+        """
+        if self._ffmpeg is None:
+            _LOGGER.warning(
+                'Audio ("play the call") is enabled but ffmpeg is unavailable — '
+                "call recordings will play at their raw (quiet) level and silent "
+                "clips won't be filtered out. Install ffmpeg, or enable Home "
+                "Assistant's ffmpeg integration, to restore normalization."
+            )
         await self._hass.async_add_executor_job(self._index)
 
     def _index(self) -> None:
