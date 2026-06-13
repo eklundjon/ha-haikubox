@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from custom_components.haikubox.coordinator import (
+from custom_components.haikubox.normalize import (
     _first_seen_per_species,
     _sanitize_daily_counts,
 )

@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from homeassistant.core import HomeAssistant
 
 from custom_components.haikubox.const import CONF_RARITY_WINDOW_DAYS
-from custom_components.haikubox.coordinator import (
+from custom_components.haikubox.normalize import (
     _apply_rarity_scores,
     _ranks_from_counts,
 )
