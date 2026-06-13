@@ -13,6 +13,7 @@ from datetime import UTC
 from types import SimpleNamespace
 from typing import Any
 
+from custom_components.haikubox.api import HaikuboxApiClient
 from custom_components.haikubox.coordinator import HaikuboxCoordinator
 
 _STORE_ATTRS = (
@@ -63,7 +64,10 @@ def make_coordinator(hass, *, config_entry=None, options=None, **attrs):
     c.serial = "TESTSERIAL"
     c.device_name = "Test Box"
     c.config_entry = config_entry or SimpleNamespace(options=options or {})
-    c._box_tz = UTC
+    # API client with the box tz pre-resolved (no network in unit tests). Tests
+    # that drive a poll still stub c._fetch_* / c._async_box_tz directly.
+    c._api = HaikuboxApiClient(None, c.serial)
+    c._api._box_tz = UTC
     c._images = FakeImages()
     c._audio = None
     c._audio_enabled = False
