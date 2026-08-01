@@ -21,16 +21,10 @@ updates:
 
   # Python test dependencies (requirements_test.txt).
   #
-  # Most entries here are deliberately unpinned (PHACC and therefore Home
-  # Assistant are pinned per-job in test.yml instead), so in practice the only
-  # thing Dependabot can bump is the ruff pin.
-  #
-  # CAUTION: ruff is pinned in TWO places that must agree —
-  # requirements_test.txt and the `pip install ruff==...` line in
-  # .github/workflows/test.yml. CI installs ruff from the workflow, not from
-  # this file, so a Dependabot PR that bumps only requirements_test.txt will
-  # pass CI while leaving the two out of sync. Mirror the version into test.yml
-  # in the same PR before merging.
+  # Most entries there are deliberately unpinned (PHACC, and therefore Home
+  # Assistant, are pinned per-job in test.yml instead), so in practice the only
+  # thing Dependabot bumps here is the ruff pin — which the lint job now reads
+  # straight out of requirements_test.txt, so a bump updates CI in the same PR.
   - package-ecosystem: pip
     directory: "/"
     schedule:
@@ -41,3 +35,11 @@ updates:
     groups:
       python:
         patterns: ["*"]
+    ignore:
+      # aiofiles appears in requirements_test.txt only to MIRROR manifest.json's
+      # runtime requirement — the manifest is the source of truth, and it keeps a
+      # deliberately low floor (>=23.0) for broad compatibility. Letting
+      # Dependabot raise it here would mean testing against a floor we don't
+      # ship, the same fidelity problem the HA version matrix exists to avoid.
+      # Raise it in manifest.json first, deliberately, then mirror it across.
+      - dependency-name: aiofiles
