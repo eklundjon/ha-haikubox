@@ -1,6 +1,6 @@
 # Haikubox for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2025.4+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -27,14 +27,11 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 
 **HACS (recommended)**
 
+Haikubox is in the [HACS](https://hacs.xyz/) default store — no custom repository needed.
+
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eklundjon&repository=ha-haikubox&category=integration)
 
-Click the badge to open HACS in your Home Assistant with this repository pre-filled, then **Download** and restart. Or add it manually:
-
-1. In **HACS**, open the **⋮** menu (top right) → **Custom repositories**
-2. Add `https://github.com/eklundjon/ha-haikubox`, type **Integration**, then **Add**
-3. Search HACS for **Haikubox**, open it, and click **Download**
-4. Restart Home Assistant
+Click the badge, then **Download** and restart. Or from within HACS: search for **Haikubox**, open it, click **Download**, then restart Home Assistant.
 
 **Manual**
 
