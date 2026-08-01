@@ -148,7 +148,42 @@ overall output shape during a structural refactor.
 - Branch off `main`; one focused change per PR.
 - Run `ruff check .` and the test suite locally before pushing — CI runs the
   same thing, so catching it locally is faster.
-- Don't hand-edit `manifest.json`'s `version`. The release workflow stamps it;
-  see `.github/workflows/release.yaml`.
+- Leave `manifest.json`'s `version` alone in feature PRs — bumping it is its own
+  deliberate step, and it is what starts a release (see
+  [Cutting a release](#cutting-a-release)).
 - Keep commit messages and PR descriptions plain text (no emoji), matching the
   existing history.
+
+## Cutting a release
+
+`custom_components/haikubox/manifest.json` is the single source of truth for the
+version. The tag is derived from it, never the other way round, so the version
+string is written in exactly one place.
+
+1. **Bump the version** in `manifest.json` in its own PR, and merge it to `main`.
+2. **CI opens a draft release** (`.github/workflows/release.yaml`): it reads the
+   version, and drafts a release named `v<version>` pinned to the merge commit.
+   No tag exists yet.
+3. **Write the notes and publish.** Publishing is what creates the tag — it is
+   the one irreversible step, and a human takes it deliberately.
+
+Change your mind before step 3? Delete the draft and bump again. Nothing has
+been tagged, so there is nothing to clean up.
+
+Why it's built this way: HACS resolves an integration's version from the *tag
+name of the latest published release*, and installs the repository tree at that
+tag. So the tree a tag points at must already carry the matching manifest
+version. Deriving the tag from the manifest guarantees that by construction. The
+previous workflow ran the other direction — publish a release, then rewrite
+`manifest.json` and force-move the tag onto the new commit — which left a window
+where the published tag pointed at a stale version, and made release snapshots
+mutable after the fact.
+
+Two details in the workflow are load-bearing, so don't "simplify" them away:
+
+- The draft is pinned with `--target "$GITHUB_SHA"`, not to `main`. A draft's
+  target is resolved when it is published, so a branch target would let anything
+  merged in the meantime move the tag to a later commit.
+- The `gh release view` guard makes the job idempotent. It also fires on
+  manifest edits that don't change the version, and GitHub permits several
+  drafts sharing one tag name.
