@@ -73,7 +73,7 @@ custom_components/haikubox/
 ├── diagnostics.py        # redacted state dump
 ├── entity.py             # HaikuboxEntity: shared device-info base for the platforms
 ├── image_cache.py        # ImageCache: download species photos once, serve locally
-├── manifest.json         # HACS manifest (version stamped on release)
+├── manifest.json         # HACS manifest (version is the release source of truth)
 ├── normalize.py          # pure response parsing, rarity/notability scoring, link URLs
 ├── sensor.py             # 14 sensor classes
 ├── statistics.py         # long-term-statistics backfill (recorder external statistics)

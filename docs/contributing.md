@@ -185,6 +185,8 @@ Two details in the workflow are load-bearing, so don't "simplify" them away:
 - The draft is pinned with `--target "$GITHUB_SHA"`, not to `main`. A draft's
   target is resolved when it is published, so a branch target would let anything
   merged in the meantime move the tag to a later commit.
-- The `gh release view` guard makes the job idempotent. It also fires on
-  manifest edits that don't change the version, and GitHub permits several
-  drafts sharing one tag name.
+- The guard uses `gh release list`, not `gh release view "$TAG"`. A draft has no
+  git tag until it is published, and the get-release-by-tag API is documented
+  only for published releases; listing does return drafts. This is what makes
+  the job idempotent — it also fires on manifest edits that don't change the
+  version, and GitHub permits several drafts sharing one tag name.

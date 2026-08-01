@@ -42,4 +42,16 @@ updates:
       # Dependabot raise it here would mean testing against a floor we don't
       # ship, the same fidelity problem the HA version matrix exists to avoid.
       # Raise it in manifest.json first, deliberately, then mirror it across.
+      #
+      # The update-types list is deliberate and must NOT be collapsed to a bare
+      # `- dependency-name: aiofiles`. An unqualified ignore also suppresses
+      # SECURITY update PRs ("Setting this option will also affect pull requests
+      # for security updates", per Dependabot's options reference), which would
+      # silently opt this dependency out of automated vulnerability fixes.
+      # Naming the three version-update types confines the ignore to routine
+      # bumps, so a security fix for aiofiles still opens a PR.
       - dependency-name: aiofiles
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
