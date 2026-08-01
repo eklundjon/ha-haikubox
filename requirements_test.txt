@@ -19,4 +19,4 @@ aiofiles>=23.0
 
 # Linter — pinned so local and CI agree (see the matching pin in
 # .github/workflows/test.yml). Config lives in pyproject.toml.
-ruff==0.15.17
+ruff==0.16.0
