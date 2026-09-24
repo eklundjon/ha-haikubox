@@ -15,8 +15,8 @@ pytest-cov
 
 # The integration's own runtime requirement (manifest.json) — needed so the
 # test environment can import the package.
-aiofiles>=23.0
+aiofiles>=25.1.0
 
 # Linter — pinned so local and CI agree (see the matching pin in
 # .github/workflows/test.yml). Config lives in pyproject.toml.
-ruff==0.16.0
+ruff==0.16.1
