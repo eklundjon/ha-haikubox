@@ -10,8 +10,9 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "frontend",
     "http",
-    "frontend"
+    "lovelace"
   ],
   "documentation": "https://github.com/eklundjon/ha-haikubox",
   "integration_type": "device",

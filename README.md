@@ -58,7 +58,7 @@ If setup fails with *"No shared Haikubox found for that serial"*, double-check b
 
 ### Add a card
 
-Both custom cards register automatically — no Lovelace resource setup required. The simplest "show me a bird" card:
+Both custom cards register automatically — no Lovelace resource setup required. (The integration adds a small `/local/haikubox-card-loader.js` resource itself so the cards also load on pages opened while Home Assistant is still starting; YAML-mode dashboards need to list it by hand — see [troubleshooting](docs/troubleshooting.md#cards-show-custom-element-doesnt-exist-after-a-restart).) The simplest "show me a bird" card:
 
 ```yaml
 type: custom:haikubox-bird-card
