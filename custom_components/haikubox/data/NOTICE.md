@@ -1,13 +1,8 @@
-# Bundled data attribution — `ebird_species_codes.json`
+# Bundled data: `ebird_species_codes.json`
 
-`ebird_species_codes.json` is a **derived** dataset: a transformed mapping of
-`common name → { eBird species_code, scientific name }`, extracted from the
-eBird/Clements taxonomy. It is **not** the original checklist file. The
-integration uses it only to resolve a species' photo (the image CDN is keyed by
-species code) and its scientific name when those weren't already learned from
-the live Haikubox API.
+`ebird_species_codes.json` maps each bird's common name to its eBird species code and scientific name. It's derived from the eBird/Clements taxonomy. It isn't the original checklist file. The integration uses it to find a species' photo (photos are stored by species code) and scientific name when Haikubox hasn't provided them yet.
 
-## Source & citation
+## Source and citation
 
 > Clements, J. F., P. C. Rasmussen, T. S. Schulenberg, M. J. Iliff,
 > T. A. Fredericks, J. A. Gerbracht, D. Lepage, A. Spencer, S. M. Billerman,
@@ -19,24 +14,14 @@ the live Haikubox API.
 
 ## Terms
 
-Per the eBird/Clements terms of use:
+Under the eBird/Clements terms of use:
 
-- This is a **derived product**, not a redistribution of the checklist in its
-  original format.
-- **Non-commercial use.** Any commercial use of eBird/Clements data requires
-  explicit permission from eBird.
-- Cornell requests that authors of derived products send eBird an electronic
-  copy; a maintainer distributing this integration commercially, or wishing to
-  honor that request, should contact eBird.
+- This is a derived product, not a copy of the checklist in its original format.
+- **Non-commercial use only.** Commercial use of eBird/Clements data requires permission from eBird.
+- Cornell asks authors of derived products to send eBird an electronic copy. Anyone distributing this integration commercially, or wanting to honor that request, should contact eBird.
 
-To refresh: download the current eBird Taxonomy CSV from the link above and
-regenerate the `common name → { SPECIES_CODE, SCI_NAME }` map for
-`CATEGORY == "species"`.
+To update it, download the current eBird Taxonomy CSV from the link above and rebuild the `common name → { SPECIES_CODE, SCI_NAME }` map from the rows where `CATEGORY == "species"`.
 
 ---
 
-This file covers only the bundled eBird-derived map. The **Haikubox API data**
-the integration surfaces at runtime (detections, counts, photos) is separately
-licensed by Haikubox under **CC BY-NC-SA 4.0** and asks that research use cite
-BirdNET (Kahl et al. 2021) — see the **Attribution & data licensing** section
-of the project README.
+This file only covers the bundled eBird map. The Haikubox data the integration shows (detections, counts and photos) is licensed separately by Haikubox under **CC BY-NC-SA 4.0**, and Haikubox asks that research use cite BirdNET (Kahl et al. 2021). See **Attribution & data licensing** in the project README.

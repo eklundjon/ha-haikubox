@@ -1,8 +1,8 @@
 # Architecture
 
-This page describes how the integration is structured internally: what each module does, how data moves through the system, what state is held where, and what runs when.
+This page covers how the code is organized: what each module does, how data gets from the Haikubox API to the sensors, what's kept where, and what runs when. If you're about to read the code, start here.
 
-If you want to read code with a map in hand, start here. For external API behaviour (what HTTP calls are made), see [docs/api.md](api.md). For the user-facing sensor contract, see [docs/sensors.md](sensors.md).
+For the network requests, see [api.md](api.md). For what the sensors expose, see [sensors.md](sensors.md).
 
 ## Component map
 
@@ -14,6 +14,7 @@ graph TB
 
     subgraph Bootstrap
         InitMod["__init__.py<br/>setup_entry + migration shim<br/>card JS registration"]
+        Loader["card_loader.py<br/>/local loader + Lovelace resource"]
     end
 
     subgraph Runtime
@@ -41,6 +42,8 @@ graph TB
 
     ConfigFlow -- "validates serial (api.py)" --> API
     InitMod -- "registers" --> Cards
+    InitMod -- "installs" --> Loader
+    Loader -- "loads at startup" --> Cards
     InitMod -- "constructs" --> Coord
     Coord -- "fetches via" --> Api
     Coord -- "transforms with" --> Normalize
@@ -62,51 +65,51 @@ graph TB
 
 ```text
 custom_components/haikubox/
-├── __init__.py           # setup + teardown; migration shims; cache static path + card registration
-├── api.py                # HaikuboxApiClient (all HTTP) + the config-flow device probe
-├── audio_cache.py        # AudioCache: download / normalize / prune detection clips
-├── binary_sensor.py      # extended-silence problem binary sensor
-├── config_flow.py        # config flow (initial + reconfigure) + options flow
-├── const.py              # domain, conf keys, tuning constants, event/trigger names
-├── coordinator.py        # HaikuboxCoordinator: the poll orchestration (the brains)
-├── device_trigger.py     # new_species / unusual_visitor / watched_species device triggers
+├── __init__.py           # setup and teardown, migrations, cache static path, card registration
+├── api.py                # HaikuboxApiClient (all HTTP) and the setup-time device check
+├── audio_cache.py        # AudioCache: download, normalize and prune detection clips
+├── binary_sensor.py      # extended-silence binary sensor
+├── card_loader.py        # copies the card loader to config/www and registers it as a resource
+├── config_flow.py        # config flow (setup and reconfigure) and options flow
+├── const.py              # domain, config keys, tuning constants, event and trigger names
+├── coordinator.py        # HaikuboxCoordinator: runs each poll
+├── device_trigger.py     # new_species / unusual_visitor / watched_species triggers
 ├── diagnostics.py        # redacted state dump
-├── entity.py             # HaikuboxEntity: shared device-info base for the platforms
-├── image_cache.py        # ImageCache: download species photos once, serve locally
-├── manifest.json         # HACS manifest (version is the release source of truth)
-├── normalize.py          # pure response parsing, rarity/notability scoring, link URLs
+├── entity.py             # HaikuboxEntity: shared device info for the platforms
+├── image_cache.py        # ImageCache: download each species photo once, serve it locally
+├── manifest.json         # the version here is the release version
+├── normalize.py          # response parsing, rarity and notability scoring, link URLs
 ├── sensor.py             # 14 sensor classes
-├── statistics.py         # long-term-statistics backfill (recorder external statistics)
-├── strings.json          # translation keys → display names
+├── statistics.py         # long-term statistics backfill
+├── strings.json          # translation keys and display names
 ├── translations/
 │   └── en.json
-├── data/                 # bundled eBird common-name → code/scientific-name map (+ NOTICE)
-├── brand/                # logo/icon (also submitted to home-assistant/brands)
+├── data/                 # eBird common name → code / scientific name map, plus NOTICE
+├── brand/                # logo and icon (also in home-assistant/brands)
 └── www/
-    ├── haikubox-bird-card.js     # single-bird card (registered via static path)
-    └── haikubox-details-card.js  # ranked list card
+    ├── haikubox-bird-card.js     # single-bird card
+    ├── haikubox-details-card.js  # list card
+    └── haikubox-card-loader.js   # startup loader, copied to config/www
 ```
 
-## The coordinator orchestrates; supporting modules do the work
+## The coordinator runs the poll, other modules do the work
 
-The poll orchestration lives in [`coordinator.py`](../custom_components/haikubox/coordinator.py) — it sequences a poll, holds the in-memory/persisted state, and builds the output dict. The reusable, stateless pieces have been pulled into their own modules, which the coordinator imports:
+[`coordinator.py`](../custom_components/haikubox/coordinator.py) runs each poll in order, holds the in-memory and saved state, and builds the data dict the sensors read. The pieces that don't need its state live in their own modules:
 
-- **`api.py`** — `HaikuboxApiClient` owns *all* HTTP to api.haikubox.com (detections, daily counts, the box timezone). It also has `async_get_device_info` (the config-flow setup probe) and `CannotConnect`, so every network call is in one place. The coordinator keeps thin `_fetch_*` / `_async_box_tz` methods that delegate to the client (so a poll's network can be stubbed per-instance in tests).
-- **`normalize.py`** — pure functions: dt parsing, the recent-window filter, per-species normalisation, rank / rarity / notability scoring, and the reference-link URL builders. No coordinator or HA state.
-- **`statistics.py`** — the long-term-statistics backfill (`async_import_history_statistics`); the recorder imports stay lazy inside it.
-- **`image_cache.py`** / **`audio_cache.py`** — write-once photo cache and the (opt-in) detection-clip cache.
+- **`api.py`**: `HaikuboxApiClient` makes every request to api.haikubox.com (detections, daily counts, the box's time zone). `async_get_device_info` and `CannotConnect`, used by setup, are here too, so all network code is in one file. The coordinator's small `_fetch_*` and `_async_box_tz` methods call the client, which lets tests stub the network per coordinator.
+- **`normalize.py`**: plain functions for parsing `dt`, the recent-window filter, merging detections by species, ranking and scoring, and building reference links. No coordinator or Home Assistant state.
+- **`statistics.py`**: the long-term statistics backfill (`async_import_history_statistics`). The recorder imports stay inside it so they only load when used.
+- **`image_cache.py`** and **`audio_cache.py`**: the photo cache and the optional clip cache.
 
-The integration is deliberately thin elsewhere too:
+Everything else is thin:
 
-- **Sensors** are dumb projections — `native_value` and `extra_state_attributes` just read from `self.coordinator.data`. No sensor ever calls the API, holds state, or does work. `PARALLEL_UPDATES = 0` because they all read the same in-memory dict; HA's parallelism guard isn't relevant. (They share a small device-info base in `entity.py`.)
-- **The config flow** validates a serial (via `api.async_get_device_info`) and stores it. It doesn't talk to the coordinator at all — once the entry exists, `async_setup_entry` is HA's responsibility and it constructs the coordinator from `entry.data`.
-- **`__init__.py`** is mostly registration boilerplate (the cache static path + card JS, the migration shims, forward to the sensor + binary-sensor platforms).
+- **Sensors** only read from `self.coordinator.data`. None of them call the API, keep state, or do any work. `PARALLEL_UPDATES = 0` because they all read the same dict. `entity.py` has their shared device info.
+- **The config flow** checks the serial with `api.async_get_device_info` and saves it. It never talks to the coordinator. Home Assistant calls `async_setup_entry`, which builds the coordinator from `entry.data`.
+- **`__init__.py`** is mostly registration: the cache static path, the card JS and loader, migrations, and forwarding to the sensor and binary sensor platforms.
 
 ### Inside `_async_update_data`
 
-The one-time store load + cache warm runs earlier, in `_async_setup` (HA's
-DataUpdateCoordinator setup hook, invoked once before the first refresh), so the
-poll body below has no "loaded yet?" guard.
+Saved data is loaded and the caches are warmed once, in `_async_setup`. That's the `DataUpdateCoordinator` hook that runs before the first refresh, so the poll itself never has to check whether things are loaded.
 
 ```mermaid
 flowchart TD
@@ -137,54 +140,54 @@ flowchart TD
     Build --> Done([return → sensors update])
 ```
 
-The flow is **strictly sequential** — each `await` waits for the previous one. There's no `asyncio.gather` and no background tasks. This keeps the data dependencies explicit:
+Each step waits for the one before it. There's no `asyncio.gather` and no background tasks, which keeps the ordering easy to follow:
 
-- The rarity baseline (the trailing-window aggregate from `daily_counts`) must be rebuilt before rarity scoring.
-- `daily_count` (the 24-hour normalisation) has to land before the `_seen_species` bootstrap — that bootstrap fires *before* the recent-window new-species loop so a fresh install seeds from the full 24-hour window, not just the 1-hour subset (see issue #14).
-- `rarest_species` reads the last 7 days of `daily_counts` plus today's 24h list, so species heard 1–24h ago still count toward today (see issue #15).
-- `last_detection` is fed by a persisted rolling event buffer: each poll's events (`_build_recent_events`) are merged in (de-duped, capped at 50), so its `detections` + state survive restarts and outages instead of draining with the live feed (#62). `notable_species` is intentionally *not* persisted — it drains with its 24 h window to `unknown`.
-- Notability is the last scoring pass: it reads the user-tuned `notable_rarity_weight` from `entry.options` and stamps a blended `notability_score` on every `daily_count` record before the output dict is built.
+- The rarity baseline has to be rebuilt before anything is scored.
+- The 24-hour list has to exist before the `_seen_species` seed. The seed runs before new-species tracking so a new install is seeded from the full 24 hours, not just the last hour (issue #14).
+- `rarest_species` uses the last 7 days of `daily_counts` plus today's 24-hour list, so birds heard 1–24 hours ago count toward today (issue #15).
+- `last_detection` reads a saved list of recent events. Each poll's events (`_build_recent_events`) are merged in, with duplicates removed and a cap of 50, so it survives restarts and outages (issue #62). `notable_species` isn't saved. It empties with its 24-hour window and becomes `unknown`.
+- Notability is scored last. It reads `notable_rarity_weight` from `entry.options` and adds `notability_score` to each 24-hour record.
 
-### Why everything funnels through one dict
+### One data dict
 
-The coordinator returns a single `dict[str, Any]` per poll. Most keys mirror sensor IDs directly. The deliberate exceptions:
+Each poll returns one `dict[str, Any]`. Most keys match sensor names. The exceptions:
 
-- **Singular records** are split from their plural list counterparts: `last_detection` (buffer head) vs. `recent_events` (list); `notable_detection` (current top, or `None`) vs. `notable_detections` (list); `new_detection` vs. `new_detections`. `last_detection` + `new_detection` persist (event buffer / seen-species log); `notable_detection` is live and drains to `None` (→ sensor `unknown`) with its 24 h window (#62).
-- **`recent_events`** is the per-event list `last_detection`'s `detections` attribute reads — a persisted rolling buffer of the 50 most recent events (newest first), de-duped across polls. `last_detection` itself is the buffer's head, carrying the state's species name.
-- **`lifetime_species_count`** is a scalar exposed on `new_species` as an attribute.
+- **Single records are kept apart from their lists:** `last_detection` (the newest saved event) and `recent_events` (the list); `notable_detection` (the current top, or `None`) and `notable_detections`; `new_detection` and `new_detections`. `last_detection` and `new_detection` are saved. `notable_detection` isn't, and becomes `None` (so the sensor is `unknown`) when its 24-hour window is empty (issue #62).
+- **`recent_events`** is the per-detection list behind `last_detection`'s `detections` attribute: the last 50 detections, newest first, with duplicates removed.
+- **`lifetime_species_count`** is a single number, shown as an attribute on `new_species`.
 
-This shape is the **contract** between the coordinator and the sensors:
+This dict is the contract between the coordinator and the sensors:
 
-> Coordinator-produced key set == sensor-consumed key set. Violations are caught by an AST parity check, not by runtime.
+> The keys the coordinator produces must match the keys the sensors read. An AST parity check enforces this.
 
-That's what makes the sensors trivial to write and the integration easy to refactor: adding a new sensor means adding one dict key on the coordinator side and one sensor class on the consumer side, and they can be developed independently as long as they agree on the key name.
+Adding a sensor means adding one key to the dict and one sensor class. The two sides only need to agree on the key name.
 
-See [docs/sensors.md](sensors.md) for the full key contract and the `detections` attribute shape.
+See [sensors.md](sensors.md) for the `detections` attribute.
 
-## State and persistence
+## State
 
-The coordinator holds three categories of state:
+The coordinator has three kinds of state.
 
-### 1. Volatile in-memory (rebuilt every poll)
+### 1. Rebuilt every poll
 
-Locals in `_async_update_data`: `detections` (1h subset, ranked by recency), `daily_count` (24h list, ranked by count), `notable` (24h list, ranked by `notability_score`), `seven_day_rare` (`_build_rarest` output — last 7 days of `daily_counts`), `poll_events` (this poll's `_build_recent_events` output, merged into the persisted event buffer). Plus the lifetime-history list returned by `_build_new_species_history()` (→ `new_species.detections`), built from the durable `_seen_species` log so it persists from poll to poll.
+Local variables in `_async_update_data`: `detections` (last hour, newest first), `daily_count` (24 hours, by count), `notable` (24 hours, by `notability_score`), `seven_day_rare` (from `_build_rarest`), and `poll_events` (this poll's events from `_build_recent_events`, merged into the saved list). The `new_species` list comes from `_build_new_species_history()`, which reads the saved `_seen_species`, so it carries over between polls.
 
-### 2. Persisted in-memory (`.storage/`)
+### 2. Saved in `.storage/`
 
-| Field | Persisted as | Rehydrated by |
+| Field | Saved as | Loaded by |
 |---|---|---|
 | `_seen_species: dict[str, str]` | `haikubox.<serial>.seen_species` | `_async_setup` |
 | `_sp_codes: dict[str, str]` | `haikubox.<serial>.sp_codes` | `_async_setup` |
 | `_sci_names: dict[str, str]` | `haikubox.<serial>.sci_names` | `_async_setup` |
 | `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_async_setup` |
-| `_daily_counts: dict[str, dict[str, int]]` (full lifetime) — the derived `_baseline_ranks` / `_baseline_species_count` / `_baseline_items` are rebuilt from its trailing window | `haikubox.<serial>.daily_counts` | `_async_setup` (baseline rebuilt at load) |
-| `_event_buffer: list[dict]` (rolling last-50 events; backs `last_detection`) | `haikubox.<serial>.recent_events` | `_async_setup` |
+| `_daily_counts: dict[str, dict[str, int]]` for the life of the box. `_baseline_ranks`, `_baseline_species_count` and `_baseline_items` are rebuilt from it. | `haikubox.<serial>.daily_counts` | `_async_setup`, which also rebuilds the baseline |
+| `_event_buffer: list[dict]`, the last 50 detections behind `last_detection` | `haikubox.<serial>.recent_events` | `_async_setup` |
 
-Each store is written **only when its data changes**, gated by a dirty flag. The event buffer, for example, only writes when a poll actually adds a new event — not on every poll.
+Each file is only written when its data changes, tracked with a dirty flag. The event list, for example, is only written when a poll adds a new detection.
 
-### 3. On-disk image cache
+### 3. Photos and audio on disk
 
-Bird photos live in `/config/haikubox/<sp_code>.jpeg` (audio clips alongside them under `audio/<serial>/`). The directory is served by the integration's **own** static path at `/haikubox/cache/<sp_code>.jpeg`, registered in `async_setup` after the directory is created — so it works on a fresh install without depending on HA's `/local` (which HA only mounts when `config/www` exists at boot). It also keeps the integration out of the user's `config/www`. `ImageCache` builds an in-memory `_cached: set[str]` from the directory contents at startup so URL lookups are pure memory checks afterwards.
+Photos are saved as `/config/haikubox/<sp_code>.jpeg`, and audio clips under `audio/<serial>/` in the same folder. The integration serves that folder itself at `/haikubox/cache/`. The path is registered in `async_setup` after the folder is created, so it works on a new install without HA's `/local` (which only exists if `config/www` was there at startup). `ImageCache` reads the folder once at startup into an in-memory `_cached` set, so lookups after that don't touch the disk.
 
 ## Lifecycle
 
@@ -202,6 +205,7 @@ sequenceDiagram
     HA->>Init: async_setup(hass, config)
     Init->>HA: register /haikubox/*.js static paths
     Init->>HA: add_extra_js_url with ?v=<version>
+    Init->>HA: install /local card loader + Lovelace resource
 
     Note over User: User adds the integration
     User->>HA: Settings → Add → Haikubox
@@ -225,20 +229,21 @@ sequenceDiagram
         Coord->>Sensor: data dict ready (CoordinatorEntity notifies)
     end
 
-    Note over User: User adjusts notability weight
+    Note over User: User changes an option
     User->>HA: Settings → Devices & Services → Haikubox → Configure
     HA->>Init: options updated
-    Init->>Coord: async_request_refresh()
-    Coord->>Sensor: data dict ready (no scheduler wait)
+    Init->>HA: async_reload(entry) (rebuilds the coordinator and polls)
 
     Note over User: User removes the integration
     HA->>Init: async_unload_entry(entry)
-    Init->>HA: unload sensor platform
+    Init->>HA: unload sensor platforms
 ```
+
+Changing an option reloads the entry rather than just refreshing it. Some options (poll interval, audio, the windows) are read once when the coordinator is created, so a refresh wouldn't pick them up.
 
 ## Migration
 
-[`_migrate_unique_ids`](../custom_components/haikubox/__init__.py) runs on every `async_setup_entry`. It's a one-time entity-registry shim that renames 0.3.x unique_ids to their 0.4 equivalents:
+[`_migrate_unique_ids`](../custom_components/haikubox/__init__.py) runs on every `async_setup_entry`. It renames 0.3.x unique IDs to their 0.4 names in the entity registry:
 
 ```python
 _UNIQUE_ID_RENAMES = {
@@ -250,78 +255,67 @@ _UNIQUE_ID_RENAMES = {
 }
 ```
 
-Each rename is idempotent: if the old unique_id doesn't exist (fresh install or already migrated), nothing happens. If the new one already exists, the shim refuses to collide. `new_species` is deliberately **not** in the table — its 0.3.x ID is the same as its 0.4 ID, and remapping it would orphan working entities.
+It's safe to run every time. If the old ID isn't there (a new install, or already migrated), nothing happens. If the new ID already exists, it leaves both alone. `new_species` isn't in the table because its ID didn't change, and mapping it would break a working entity.
 
-`daily_species` was removed in 0.4 entirely and cannot be migrated; it leaves an orphaned entity that the user can delete from the entity registry.
+`daily_species` was removed in 0.4 and can't be migrated. Users are left with an orphaned entity they can delete.
+
+The other migrations in `__init__.py` move the photo cache out of `config/www/haikubox` (older versions kept it there) and move 0.7's flat audio cache into per-serial folders.
 
 ### Minimum HA version
 
-The integration's `hacs.json` pins a minimum of **Home Assistant 2025.4**. The binding requirement is the recorder statistics API used by the long-term Statistics backfill ([`statistics.py`](../custom_components/haikubox/statistics.py) `async_import_history_statistics`, called via the coordinator's thin `_import_history_statistics` wrapper): `StatisticMeanType` and the `mean_type` field on `StatisticMetaData` landed in **2025.4.0**. On older cores the lazy import would raise `ImportError` and fail every poll, so the floor is real, not cosmetic. (We also pass `unit_class=None`, which only became a defined `StatisticMetaData` field in 2025.11 but is a harmless extra key before then — the recorder reads only the keys it knows.)
+`hacs.json` sets the minimum to Home Assistant 2025.4. The reason is the recorder statistics API used by [`statistics.py`](../custom_components/haikubox/statistics.py): `StatisticMeanType` and the `mean_type` field on `StatisticMetaData` arrived in 2025.4.0. On older versions the import fails and every poll fails with it. The code also passes `unit_class=None`, which only became a real `StatisticMetaData` field in 2025.11. Older versions ignore it.
 
-Two earlier requirements are subsumed by that floor: 2024.12 made `OptionsFlow.config_entry` a read-only property (the options flow relies on the framework setting `self.config_entry` rather than assigning it from `__init__`), and the sections-grid sizing API the cards use is also a 2024.12-era feature.
+That floor also covers two older requirements from 2024.12: `OptionsFlow.config_entry` became read-only (the options flow relies on the framework setting it), and the sections grid sizing API the cards use.
 
 ## Custom cards
 
-Two cards live in `www/` and are registered automatically by `async_setup`:
+The two cards in `www/` are registered in `async_setup`:
 
-- `haikubox-bird-card` ([www/haikubox-bird-card.js](../custom_components/haikubox/www/haikubox-bird-card.js)) — single-bird tile. Reads `attrs.detections[0]` uniformly for every list-bearing sensor (no state-vs-list bifurcation). Supports HA's standard `tap_action` schema with `{species}`, `{species_slug}` (spaces → underscores, e.g. for allaboutbirds.org-style URLs), `{sp_code}`, and `{scientific_name}` token substitution; tokens resolve from the same `detections[0]` record the card displays.
-- `haikubox-bird-list-card` ([www/haikubox-details-card.js](../custom_components/haikubox/www/haikubox-details-card.js)) — ranked list with tap-to-expand rows. Works with any list-bearing sensor by reading `attrs.detections`.
+- `haikubox-bird-card` ([www/haikubox-bird-card.js](../custom_components/haikubox/www/haikubox-bird-card.js)) shows one bird. It reads `attrs.detections[position - 1]` for every sensor. It supports HA's standard `tap_action`, plus a custom `show-list`, and the `{species}`, `{species_slug}`, `{sp_code}` and `{scientific_name}` tokens, which come from the bird being shown.
+- `haikubox-bird-list-card` ([www/haikubox-details-card.js](../custom_components/haikubox/www/haikubox-details-card.js)) shows a ranked list with rows that expand. It reads `attrs.detections`. The bird card's ⓘ popup reuses it in `detail_only` mode.
 
-Both cards read sensor state from HA's frontend WebSocket connection — they have no direct knowledge of the coordinator or the API. Cards are versioned via the `?v=` query string injected by `add_extra_js_url`; on HA restart after an update the browser bypasses its cache and picks up the new JS.
+The cards only read sensor state through the frontend's WebSocket connection. They know nothing about the coordinator or the API.
+
+### How the cards get onto the page
+
+`add_extra_js_url` adds the card URLs, with `?v=<version>` to bust the browser cache, to the page HTML. HA writes that list into `index.html` when it serves the page, and the frontend never loads anything added later. HA starts serving pages before stage-2 integrations like this one have run `async_setup`, so a page loaded during startup has no cards. A browser or app reconnecting after a restart reloads during exactly that window.
+
+[`card_loader.py`](../custom_components/haikubox/card_loader.py) handles that case:
+
+- It copies `www/haikubox-card-loader.js` to `config/www/`. `/local` is set up by the frontend integration before the web server starts, so the loader can always be fetched.
+- It registers the loader as a Lovelace resource at `/local/haikubox-card-loader.js?v=<version>`. Resources are saved in `.storage`, so the page lists the loader even during startup. There's exactly one entry: upgrades update it in place, and duplicates are removed.
+- The loader imports the real card modules from `/haikubox/…`, retrying with backoff until the static path exists. Lovelace rebuilds its error cards once the elements are defined.
+- Its first try uses the same URL as `add_extra_js_url`, so the browser runs each module once whichever gets there first.
+
+This only works for storage-mode dashboards. YAML dashboards have to add the resource themselves. Removing the last entry removes the resource and the file.
 
 ### Card robustness
 
-- **Entity picker filter.** Both cards' visual editors pre-filter the entity picker to Haikubox-platform sensors that expose a `detections` list. `daily_count` (numeric-only) is hidden; unrelated integrations don't appear.
-- **Image error fallback.** A broken `<img>` (S3 404, network drop) is swapped for the 🐦 placeholder element so dashboards never show the browser's broken-image glyph.
-- **Live relative-time ticker.** A 60-s `setInterval` wired in `connectedCallback` rewrites just the time-label text content (no full re-render), so labels like "5m ago" stay honest between the 10-min polls without flickering images or interrupting expansion animations.
-- **`setConfig` / `set hass` race guard.** HA's card lifecycle is normally `setConfig` → `set hass`, but during a dashboard reload or first-mount edge case `set hass` can arrive first. `_render` and `_handleTapAction` early-return when `!this._config` instead of throwing on `this._config.entity`, so the next `set hass` after `setConfig` produces a clean render rather than leaving the card stuck in HA's error state ("yellow !").
-- **Idempotent `customElements.define`.** If the integration JS gets loaded twice in the same page (cache flap during an HA upgrade, version-bust transient, etc.), the bottom-of-file `customElements.define(...)` and `customCards.push(...)` are wrapped in a `customElements.get(...)` check. A second load is a complete no-op rather than throwing and aborting mid-script.
+- **Entity picker filter.** The editors only offer Haikubox sensors with a `detections` list.
+- **Broken images.** A photo that fails to load is replaced with the 🐦 placeholder, so the browser's broken-image icon never shows.
+- **Relative time.** A 60-second timer, started in `connectedCallback`, rewrites just the "5m ago" text. There's no full re-render, so images don't flicker and open rows don't collapse.
+- **`setConfig` / `set hass` order.** HA normally calls `setConfig` before `set hass`, but during a dashboard reload `set hass` can come first. `_render` and `_handleTapAction` return early when there's no config yet, instead of throwing and leaving the card stuck on HA's error card.
+- **Loading twice.** If a card's JS runs twice on the same page (the loader and `add_extra_js_url` under different URLs, or a cache hiccup during an upgrade), `customElements.define` and `customCards.push` are skipped when the element already exists.
 
 ## Automation events
 
-The coordinator fires a single bus event, `haikubox_event`, for noteworthy
-detections, discriminated by a `type` field (`new_species` / `unusual_visitor`
-/ `watched_species`) — the same one-event-many-types convention HA uses for
-`deconz_event` / `bthome_ble_event`. `_fire_detection_events` runs at the end of
-each `_async_update_data`, after the lookup stores are updated:
+The coordinator fires one bus event, `haikubox_event`, with a `type` field of `new_species`, `unusual_visitor` or `watched_species`. HA does the same with `deconz_event` and `bthome_ble_event`. `_fire_detection_events` runs at the end of `_async_update_data`, after the lookup tables are updated:
 
-- **`new_species`** fires for species in `newly_seen` — those first recorded
-  this poll by the lifetime first-seen log. Naturally silent on a fresh-install
-  bootstrap (which pre-seeds `_seen_species`).
-- **`unusual_visitor`** fires when a species enters the recent window that
-  wasn't in the previous poll's window (`current_recent − _prev_recent_species`)
-  *and* whose prior last-seen gap meets the configured `absence_days` threshold.
-  `_prev_recent_species` starts `None`, so the first poll of a session only
-  baselines (no replay on restart); the edge gate stops re-firing while a bird
-  lingers across polls.
-- **`watched_species`** fires when a species on the user's watch-list (the
-  options-flow pick-list plus the free-text extras) enters the recent window.
-  Same edge gate as `unusual_visitor` (`_prev_recent_species` baselines on the
-  first poll); a newly-seen watched bird fires both `new_species` and
-  `watched_species` — both are true.
+- **`new_species`** fires for species in `newly_seen`, the ones added to the first-seen log this poll. A new install doesn't fire, because the seed fills `_seen_species` first.
+- **`unusual_visitor`** fires for species that are in the recent window now but weren't last poll (`current_recent − _prev_recent_species`), and that had been gone at least `absence_days`. `_prev_recent_species` starts as `None`, so the first poll after a restart only records a starting point. Because it only fires when a species first appears, a bird that stays for several polls fires once.
+- **`watched_species`** fires when a species on the watch list enters the recent window. The watch list is the options flow's pick list plus any typed-in names. It uses the same first-appearance check as `unusual_visitor`. A brand-new watched bird fires both `new_species` and `watched_species`.
 
-[`device_trigger.py`](../custom_components/haikubox/device_trigger.py) exposes
-all three (`TRIGGER_TYPES`) as device triggers. `async_attach_trigger` delegates to the core event
-trigger platform (`homeassistant.components.homeassistant.triggers.event`),
-filtered to `haikubox_event` with matching `device_id` + `type` — so the device
-picker entry is a thin, well-supported wrapper over the bus event rather than a
-bespoke listener.
+[`device_trigger.py`](../custom_components/haikubox/device_trigger.py) offers all three as device triggers (`TRIGGER_TYPES`). `async_attach_trigger` hands off to HA's own event trigger (`homeassistant.components.homeassistant.triggers.event`), filtered on `haikubox_event`, `device_id` and `type`. The device trigger is just a filter on the event, not a separate listener.
 
-The four **blueprints** (three per-trigger notifications + a media-player "play
-the call") live in `blueprints/automation/haikubox/` at the repo root (not under
-`custom_components/`). They double as worked examples of the `haikubox_event`
-payload fields (photo, reference-link buttons, `lifetime_species_count`,
-`audio_url`), which are common to every event. Custom integrations can't
-auto-install blueprints into a user's config, so they're distributed by import
-URL — see [docs/automations.md](automations.md).
+The four blueprints are in `blueprints/automation/haikubox/` at the repo root. They also serve as examples of the event fields: photo, reference-link buttons, `lifetime_species_count` and `audio_url`. Every event carries all of those fields. An integration can't install blueprints for the user, so they're imported by URL (see [automations.md](automations.md)).
 
-## Design choices worth knowing
+## Design decisions
 
-- **Single coordinator, all entities.** Every sensor and the binary sensor share one `DataUpdateCoordinator`. Updating any one entity refreshes them all — useful for the "custom polling cadence" pattern described in [docs/advanced.md](advanced.md). Every entity reads only keys the coordinator already produces, so adding an entity never changes the data-dict contract.
-- **`_unrecorded_attributes = {"detections"}`** on every sensor. The `detections` lists can run to 50+ records with images and metadata; persisting them on every state change would bloat the recorder DB and trip HA's state-attribute size warnings. The lists stay on the live state object for cards to read.
-- **Idempotent migration on every setup.** The shim doesn't track "has migration run" — it just checks the registry. Cheap, no version flag to maintain, no chance of getting out of sync.
-- **24-hour bootstrap for `_seen_species`.** A fresh install seeds the lifetime first-seen log from the 24-hour window we already fetch every poll, so `new_species`/`new_detections` populate on poll 1 rather than treating every species as newly-discovered — see [docs/sensors.md](sensors.md) for the user-visible effect. (`last_detection` needs no bootstrap — its event buffer fills from poll 1's `/detections`; `notable_species` is live.)
-- **Box-local day boundaries.** The coordinator's "today" is `dt_util.now(await self._async_box_tz()).date()` — anchored to the *box's own* timezone (read from `/haikubox/<serial>`, falling back to HA's tz until it resolves). It bounds the trailing rarity window, the 7-day `rarest_species` window, the daily-volume sensors, and which `/daily-count` dates to fetch. The endpoint is keyed by the box's local calendar day, so a UTC "today" ran ahead of the box's day each evening and tripped `/daily-count` 400s (issue #16); the box-local boundary fixes that. Recency-window thresholds compared against raw detection `dt` values stay in UTC (absolute instants).
-- **Persisted lists where the data supports them.** `last_detection.detections` is a persisted rolling buffer of the 50 most recent individual events (per-event, not per-species), and `new_species.detections` the 50 most-recently-first-seen species from `_seen_species` — both survive restarts *and* outages, so the bird-card always has a populated `detections[0]` once the box has any history. `notable_species`, by contrast, is an explicit 24 h observation window: it drains to `unknown` in genuine 24h+ silence — that's the intended hardware/connectivity signal (#62), not a bug.
-- **Notability is user-tunable.** `notable_species` ranks by a `notability_score = w · rarity_score + (1 − w) · recency_score` blend. The weight `w` is exposed as a 0–100 % slider in the integration's options flow (Devices & Services → Haikubox → Configure). An `entry.add_update_listener` triggers `coordinator.async_request_refresh()` on slider change so the ranking updates within seconds, not at the next 10-min poll.
-- **Cards read state, not the coordinator.** That makes them dashboard-portable: a user can copy the card YAML between HA instances and it just works as long as the sensors are present.
+- **One coordinator for everything.** All sensors share one `DataUpdateCoordinator`. Updating any entity refreshes them all, which is what makes the custom polling automation in [advanced.md](advanced.md) work.
+- **`_unrecorded_attributes = {"detections"}`** on every sensor. The lists can have 50 or more records. Recording them on every state change would bloat the database and trigger HA's attribute size warnings. The cards still read them from the live state.
+- **Migration runs every setup.** There's no "already migrated" flag to maintain. The shim just checks the registry.
+- **Seeding `_seen_species` from 24 hours.** A new install seeds the first-seen log from the 24 hours of data it already has. Otherwise every bird would show up as new on the first day. See [sensors.md](sensors.md). `last_detection` doesn't need a seed, because its list fills from the first poll.
+- **The box's time zone decides what "today" is.** The coordinator's today is `dt_util.now(await self._async_box_tz()).date()`, using the time zone from `/haikubox/<serial>` (HA's time zone until that's known). It sets the rarity window, the 7-day rarest window, the daily sensors, and which `/daily-count` dates to ask for. `/daily-count` is keyed by the box's local date, and using UTC ran ahead of the box every evening and caused 400 errors (issue #16). Recent-window checks compare instants, so they stay in UTC.
+- **Lists that should survive are saved.** `last_detection.detections` (the last 50 detections) and `new_species.detections` (the last 50 first-time species) are saved and survive restarts and outages, so the bird card always has something to show once the box has any history. `notable_species` is a 24-hour window on purpose: going `unknown` after a day of silence is how you notice the box is down (issue #62).
+- **Notability is adjustable.** `notable_species` ranks by `notability_score = w · rarity_score + (1 − w) · recency_score`, and `w` is a 0–100% slider in the options flow. Changing it reloads the entry, so the ranking updates right away.
+- **Cards read state, not the coordinator.** Card YAML can be copied to another Home Assistant install and works as long as the sensors exist.

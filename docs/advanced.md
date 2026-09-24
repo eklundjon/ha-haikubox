@@ -1,26 +1,22 @@
 # Advanced configuration
 
-## Tuning windows and cadence
+## Windows and polling
 
-The integration's window lengths and poll cadence have sensible defaults that suit most boxes, but all four are exposed under **Settings → Devices & Services → Haikubox → Configure → Advanced** (a collapsed section — defaults are fine, change only if you know you want to). Changing an option reloads the entry, so new values take effect on the next poll.
+The defaults work for most boxes, but you can change them under **Settings → Devices & Services → Haikubox → Configure → Advanced**. Saving reloads the integration, so new values take effect right away.
 
-| Option | Default | Range | What it changes |
+| Option | Default | Range | What it does |
 | --- | --- | --- | --- |
-| **Recent window** | 1 hour | 1–24 h | How far back `recent_detections` looks, and how long a species stays "recent" before it can re-fire a new/unusual/watched device trigger. Longer = a fuller recent list but fewer repeat alerts. |
-| **Poll interval** | 10 min | 5–60 min | How often the box is polled. Shorter is fresher but more API load (and a faster audio/backfill cadence). |
-| **Rarity baseline window** | 365 days | 30–730 d | Trailing days of `/daily-count` history used to rank rarity (the `notable`/`rarest` sensors and the `rarity_score` on events). Shorter favors *seasonal* rarity; longer trends toward all-time. Rebuilt from the stored daily counts on the next poll — cheap to change. |
-| **New-species momentum window** | 30 days | 7–365 d | Trailing days for the "new species" momentum sensor — how many species were first heard here within the window. Display-only; affects just that sensor. |
+| **Recent window** | 1 hour | 1–24 h | How far back `recent_detections` looks. It's also how long a bird has to be gone before it can set off a new/unusual/watched trigger again. A longer window gives you a longer list and fewer repeat alerts. |
+| **Poll interval** | 10 min | 5–60 min | How often the integration checks with Haikubox. Shorter is fresher but makes more requests. |
+| **Rarity baseline window** | 365 days | 30–730 days | How many days of history rarity is measured against. Shorter makes rarity more seasonal; longer makes it closer to all-time. Changing this doesn't download anything new. |
+| **New-species momentum window** | 30 days | 7–365 days | The window for `new_species_window`. It only affects that one sensor. |
 
-Under the hood the integration makes a single 24-hour `/detections` request per poll — the recent window is derived client-side from that same response. The rarity baseline is assembled from per-day `/daily-count` history: one newly-completed day is fetched per poll, plus a throttled one-time historical backfill on a fresh install.
+## Polling on your own schedule
 
-## Polling
+The **Poll interval** option covers 5 to 60 minutes. If you want something else, like polling only during the day, turn off automatic polling and refresh from an automation instead:
 
-### Changing the polling cadence
-
-The simplest way to change how often the box is polled is the **Poll interval** option above (5–60 minutes). For finer control — a schedule-based cadence, or polling outside that range — turn off automatic polling and drive the refresh yourself:
-
-1. Go to **Settings → Devices & Services**, open the **Haikubox** entry, use the **⋮** menu → **System options**, and turn **off** *"Enable polling for updates"*. Automatic polling stops.
-2. Add an automation that refreshes the data on your chosen schedule. All Haikubox sensors share one data coordinator, so updating **any one** of them refreshes them all:
+1. Go to **Settings → Devices & Services**, open **Haikubox**, and choose **⋮ → System options**. Turn off **Enable polling for updates**.
+2. Create an automation that updates any one Haikubox sensor on your schedule. All the sensors share the same data, so updating one refreshes them all.
 
 ```yaml
 automation:
@@ -34,8 +30,8 @@ automation:
           entity_id: sensor.bird_shazam_last_detection
 ```
 
-This is Home Assistant's built-in, integration-agnostic mechanism for a custom polling interval — see the [HA docs on polling](https://www.home-assistant.io/common-tasks/general/#defining-a-custom-polling-interval).
+This is standard Home Assistant. See [defining a custom polling interval](https://www.home-assistant.io/common-tasks/general/#defining-a-custom-polling-interval) in the HA docs.
 
 ## Changing the serial number
 
-If you replace your Haikubox or initially entered the wrong serial, open the integration entry under **Settings → Devices & Services**, choose **Reconfigure**, and enter the new serial. The device's entity history is preserved across the change.
+If you replace your Haikubox, or entered the wrong serial, go to **Settings → Devices & Services**, open the Haikubox entry, choose **Reconfigure**, and enter the new serial. Your sensor history is kept.
