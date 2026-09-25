@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 
 from .audio_cache import AudioCache
+from .card_loader import async_install_card_loader, async_remove_card_loader
 from .const import (
     CACHE_DIR_NAME,
     CACHE_URL_BASE,
@@ -26,6 +27,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
+# Keep in sync with CARDS in www/haikubox-card-loader.js.
 _CARDS = [
     ("/haikubox/haikubox-bird-card.js",      "www/haikubox-bird-card.js"),
     ("/haikubox/haikubox-bird-list-card.js", "www/haikubox-details-card.js"),
@@ -51,6 +53,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         # The ?v= query busts the browser cache on upgrade; without it,
         # default cache headers would serve a stale card after an update.
         add_extra_js_url(hass, f"{url}?v={version}")
+    # add_extra_js_url only reaches pages rendered after this point; the loader
+    # covers pages loaded while HA was still starting (see card_loader.py).
+    await async_install_card_loader(hass, version)
     return True
 
 
@@ -206,3 +211,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) ->
     if not hass.config_entries.async_entries(DOMAIN):
         cache_dir = Path(hass.config.path(CACHE_DIR_NAME))
         await hass.async_add_executor_job(shutil.rmtree, cache_dir, True)
+        await async_remove_card_loader(hass)

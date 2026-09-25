@@ -50,6 +50,25 @@ If the card picker doesn't list them after install:
 2. Hard-refresh your dashboard (browser reload bypassing cache, e.g. **⇧⌘R** / **Ctrl-F5**). HACS-served JS is cached aggressively.
 3. Check **Settings → System → Logs** for `haikubox` setup errors — if setup failed, the cards never got registered.
 
+## Cards show "Custom element doesn't exist" after a restart
+
+**Why it happens.** Home Assistant serves the dashboard page before custom integrations have finished setting up, and only includes the card JavaScript that had been registered when the page was served. A browser or Companion app that reconnects after a restart reloads the page right away, before the Haikubox integration has registered its cards, so it gets a page without them. Without a fix, every Haikubox card on that page shows an error until you refresh.
+
+**What the integration does about it.** On setup it copies a small loader to `config/www/haikubox-card-loader.js` and adds it as a dashboard resource (**Settings → Dashboards → ⋮ → Resources**, URL `/local/haikubox-card-loader.js?v=<version>`). Home Assistant serves `/local` from the moment its web server starts, so the loader is always on the page. It keeps retrying the card imports until the integration is up, and the error cards then turn into working cards without a refresh. Don't delete that resource; it's removed automatically when you remove the last Haikubox device.
+
+**If it still happens:**
+
+1. **YAML-mode dashboards** (`lovelace: mode: yaml`) can't have resources added by integrations. Add it yourself:
+   ```yaml
+   lovelace:
+     mode: yaml
+     resources:
+       - url: /local/haikubox-card-loader.js
+         type: module
+   ```
+   A hand-written URL can't carry the release version the way the automatic resource does. So on a page loaded during startup just after an upgrade, the browser may reuse its cached copy of the old card code. A hard refresh fixes that.
+2. **First restart after installing** — Home Assistant only serves `/local` if `config/www` existed when it started. If the integration had to create that folder, the loader starts working from the next restart.
+
 ## Cards show the placeholder bird (🐦) after upgrading the integration
 
 If an HA dashboard tab was open during an integration upgrade, you may see `haikubox-bird-card` swap from real photos to the 🐦 placeholder for sensors that were rendering normally before. This is one-time post-upgrade behaviour, not a hardware or data issue.
