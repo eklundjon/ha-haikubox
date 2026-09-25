@@ -58,7 +58,7 @@ If you see *No shared Haikubox found for that serial*, check that the serial is 
 
 ### Add a card
 
-The cards install themselves, so there's nothing to add under dashboard resources. The simplest card is:
+The cards install themselves, so there's nothing to add under dashboard resources. (If your dashboards are in YAML mode, you do need to add one resource yourself. See [troubleshooting](docs/troubleshooting.md#cards-show-custom-element-doesnt-exist-after-a-restart).) The simplest card is:
 
 ```yaml
 type: custom:haikubox-bird-card
