@@ -4,22 +4,22 @@
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2025.4+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bird audio detection devices. Surfaces recent detections, daily and rolling 12-month species counts, and highlights unusual visitors — all with bird photos and custom Lovelace cards.
+This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com/) bird detector. It shows what your box has been hearing, keeps daily and yearly species counts, points out unusual visitors, and comes with two dashboard cards that show bird photos.
 
 ## Features
 
-- **Recent detections** — species heard in the last hour, updated every 10 minutes
-- **Last detection** — persists the most recently heard bird, never goes unknown between detections
-- **Notable species** — top bird from the trailing 24 hours by a tunable blend of rarity (vs. your box's rolling 12-month baseline) and recency; the rarity ↔ recency weight is a slider in the integration's options
-- **New species** — flags species appearing for the first time ever on your box; lifetime log survives restarts
-- **Rolling 24-hour counts** — total detections and top species over the trailing 24 hours
-- **Bird details sensors** — top species (last 12 months), top species (last 24 h), rarest species (7 d)
-- **Historical trends (no Grafana)** — backfills Home Assistant's native long-term **Statistics** with your box's *true* daily history (detections per day, species per day) — your whole recorded history, often years — so HA's built-in Statistics graph card shows real long-term trends out of the box
-- **Custom Lovelace cards** — bird photo cards and ranked list cards with tap-to-expand detail views, optional per-row links to eBird, All About Birds, and Macaulay Library, and a Wikipedia description (tap to read the full article) in the expanded detail
-- **Play the call** — a play button on the bird card and in the list card's detail plays the detection's recording in the browser. Off by default (opt in via the integration options); once on, clips are cached locally (the source URLs expire after ~1 hour) and volume‑normalized so faint calls are audible — the headline detections (last + notable) are kept for 30 days, with an option to cache the full feed for longer. Clips with no real audio show no button
-- **Automations** — device triggers for new-species, unusual-visitor, and watched-species detections, plus four ready-made blueprints for photo push notifications and playing the call on a speaker ([one-click import](docs/automations.md#importing-a-blueprint))
-- **Watched species** — choose species to be alerted about (a pick-list of ones your box has detected, plus free text for ones it hasn't); fires a device trigger when one is heard, and lists them in a "Birds of interest" sensor
-- Bird photos cached locally for offline resilience
+- **Recent detections.** Species heard in the last hour, updated every 10 minutes.
+- **Last detection.** The most recent bird the box heard. It keeps its value through restarts and quiet spells.
+- **Notable species.** The most interesting bird of the last 24 hours, scored on how rare it is at your box and how recently it was heard. You can adjust the balance between the two in the integration's options.
+- **New species.** Birds heard for the first time ever on your box.
+- **24-hour counts.** Total detections and top species over the last day.
+- **Top species and rarest species.** The most common birds over the last 12 months and the last 24 hours, and the rarest bird of the last week.
+- **Long-term history.** The integration loads your box's full daily history into Home Assistant's Statistics, so the built-in Statistics graph card can chart years of detections. No Grafana required.
+- **Dashboard cards.** A single-bird photo card and a ranked list card. Tap a list row to see a bigger photo, a Wikipedia description, and links to eBird, All About Birds and the Macaulay Library.
+- **Play the call.** A play button on the cards plays the detection's recording in your browser. This is off by default. Turn it on in the integration's options.
+- **Automations.** Device triggers for new species, unusual visitors and species you're watching for, plus four blueprints for photo notifications and playing a call on a speaker ([one-click import](docs/automations.md#importing-a-blueprint)).
+- **Watched species.** Pick birds you want to hear about and get a trigger when one shows up.
+- Bird photos are cached locally, so cards keep working if the Haikubox servers are down.
 
 ## Quick start
 
@@ -27,49 +27,49 @@ A Home Assistant custom integration for [Haikubox](https://www.haikubox.com/) bi
 
 **HACS (recommended)**
 
-Haikubox is in the [HACS](https://hacs.xyz/) default store — no custom repository needed.
+Haikubox is in the [HACS](https://hacs.xyz/) default store.
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eklundjon&repository=ha-haikubox&category=integration)
 
-Click the badge, then **Download** and restart. Or from within HACS: search for **Haikubox**, open it, click **Download**, then restart Home Assistant.
+Click the badge, click **Download**, and restart Home Assistant. You can also search for **Haikubox** from inside HACS.
 
 **Manual**
 
-1. Copy the `custom_components/haikubox` folder into your HA `config/custom_components/` directory
-2. Restart Home Assistant
+1. Copy the `custom_components/haikubox` folder into your Home Assistant `config/custom_components/` folder.
+2. Restart Home Assistant.
 
-### Configure
+### Turn on sharing
 
-**Prerequisite — enable public sharing on your Haikubox.** This integration reads from the public Haikubox API, which only exposes boxes their owner has chosen to share. Sharing is off by default; turn it on once and you're good:
+The integration reads from the public Haikubox API, which only knows about boxes whose owners have shared them. Sharing is off by default, so turn it on first:
 
 1. Log in to [listen.haikubox.com](https://listen.haikubox.com).
-2. Open the sharing setting and turn on **"Share your haikubox with friends"**.
-3. The site will display your public URL — `https://birds.haikubox.com/listen/<serial>`. Copy the `<serial>` portion (a hex code; its length varies by model, e.g. `100000003d7c9f2b`). Some units also have it printed on the base, but newer ones may not — the public URL is the reliable source.
+2. Turn on **Share your haikubox with friends**.
+3. The site now shows your public URL, `https://birds.haikubox.com/listen/<serial>`. Copy the serial from the end of it. It's a hex code, and its length depends on the model (for example `100000003d7c9f2b`). Some boxes have the serial printed on the base, but newer ones may not, so the URL is the safest place to get it.
 
-**Add the integration in Home Assistant:**
+### Add the integration
 
 1. Go to **Settings → Devices & Services → Add Integration**.
 2. Search for **Haikubox**.
-3. Paste the serial number.
+3. Paste your serial number.
 
-The integration will verify the serial against the Haikubox API and create a device named after your box (e.g. "Bird Shazam"). A set of sensors (plus an "extended silence" binary sensor) appears under that device — see [docs/sensors.md](docs/sensors.md) for the full list.
+The integration checks the serial with Haikubox and creates a device named after your box (mine is "Bird Shazam"). Its sensors are listed in [docs/sensors.md](docs/sensors.md).
 
-If setup fails with *"No shared Haikubox found for that serial"*, double-check both: the serial is correct, and sharing is enabled. (*"Could not reach the Haikubox API"* instead means a connectivity problem on the HA host.) More in [docs/troubleshooting.md](docs/troubleshooting.md).
+If you see *No shared Haikubox found for that serial*, check that the serial is right and that sharing is turned on. *Could not reach the Haikubox API* means Home Assistant couldn't connect to Haikubox at all. See [docs/troubleshooting.md](docs/troubleshooting.md) for more.
 
 ### Add a card
 
-Both custom cards register automatically — no Lovelace resource setup required. (The integration adds a small `/local/haikubox-card-loader.js` resource itself so the cards also load on pages opened while Home Assistant is still starting; YAML-mode dashboards need to list it by hand — see [troubleshooting](docs/troubleshooting.md#cards-show-custom-element-doesnt-exist-after-a-restart).) The simplest "show me a bird" card:
+The cards install themselves, so there's nothing to add under dashboard resources. (If your dashboards are in YAML mode, you do need to add one resource yourself. See [troubleshooting](docs/troubleshooting.md#cards-show-custom-element-doesnt-exist-after-a-restart).) The simplest card is:
 
 ```yaml
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_last_detection
 ```
 
-Full card reference, including the ranked list card and `tap_action` configuration: [docs/cards.md](docs/cards.md).
+The full card reference, including the list card and tap actions, is in [docs/cards.md](docs/cards.md).
 
-### Historical trends
+### Long-term history
 
-The integration backfills HA's long-term Statistics with your box's true daily history — view it with the built-in **Statistics graph** card (no Grafana). The statistic IDs use your box serial, lowercased: `haikubox:box_<serial>_daily_detections` (detections/day; totals per day/week/month) and `haikubox:box_<serial>_daily_species` (species/day):
+To chart your box's history, add a **Statistics graph** card. The statistic IDs use your serial in lowercase: `haikubox:box_<serial>_daily_detections` (detections per day) and `haikubox:box_<serial>_daily_species` (species per day).
 
 ```yaml
 type: statistics-graph
@@ -85,42 +85,30 @@ entities:
 
 | Topic | Doc |
 |---|---|
-| Full sensor reference, the `detections` attribute contract, rarity scoring, persistent state stores | [docs/sensors.md](docs/sensors.md) |
-| Both custom cards, YAML examples, tap actions, full dashboard example | [docs/cards.md](docs/cards.md) |
-| Device triggers, the `haikubox_event` payload, push-notification blueprints | [docs/automations.md](docs/automations.md) |
-| Tuning windows & poll cadence (Advanced options), changing the serial number | [docs/advanced.md](docs/advanced.md) |
-| First-install backfill timing, restart behaviour, card-cache issues, 0.3.x → 0.4.x upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| Haikubox API endpoints, polling, image CDN, failure modes | [docs/api.md](docs/api.md) |
-| Module map, data flow, persistence, lifecycle, custom-card registration | [docs/architecture.md](docs/architecture.md) |
-| Local dev setup, running the test suite, the CI matrix, the refactor smoke harness | [docs/contributing.md](docs/contributing.md) |
+| Every sensor, the `detections` attribute, how rarity is scored, what's saved between restarts | [docs/sensors.md](docs/sensors.md) |
+| The two cards, YAML examples, tap actions, a sample dashboard | [docs/cards.md](docs/cards.md) |
+| Device triggers, the `haikubox_event` event, notification blueprints | [docs/automations.md](docs/automations.md) |
+| Advanced options (windows and polling), changing the serial number | [docs/advanced.md](docs/advanced.md) |
+| Setup problems, cards not loading, sensors that look empty, upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Which Haikubox API calls the integration makes and when | [docs/api.md](docs/api.md) |
+| How the code is organized | [docs/architecture.md](docs/architecture.md) |
+| Development setup, tests, CI, releases | [docs/contributing.md](docs/contributing.md) |
 
 ## Attribution & data licensing
 
-**Haikubox detection data & photos.** This integration surfaces data from the
-Haikubox API — detections, species counts, and the bird photos served from its
-image CDN — which is powered by [BirdNET](https://birdnet.cornell.edu/). Per
-Haikubox, that data is licensed under **Creative Commons
-Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0)**. If you use
-Haikubox data for research, please cite BirdNET:
+**Haikubox data and photos.** Detections, species counts and bird photos come from the Haikubox API, which is powered by [BirdNET](https://birdnet.cornell.edu/). Haikubox licenses that data under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0)**. If you use it for research, please cite BirdNET:
 
 > Kahl, S., Wood, C. M., Eibl, M., & Klinck, H. (2021). BirdNET: A deep learning
 > solution for avian diversity monitoring. *Ecological Informatics*, 61, 101236.
 
-**Species-code map.** To resolve a photo for species not yet seen in the live
-detection sample, the integration bundles a derived `common name → species
-code` map from the **eBird/Clements Checklist v2025** (© Cornell Lab of
-Ornithology) — see
-[custom_components/haikubox/data/NOTICE.md](custom_components/haikubox/data/NOTICE.md)
-for the citation and terms.
+**Species codes.** To find photos for birds the box hasn't reported yet, the integration includes a common name → species code list derived from the **eBird/Clements Checklist v2025** (© Cornell Lab of Ornithology). The citation and terms are in [custom_components/haikubox/data/NOTICE.md](custom_components/haikubox/data/NOTICE.md).
 
-**Non-commercial.** Both data sources above are **non-commercial**. The
-integration's *code* is MIT-licensed (below), but the bird **data** it relies on
-is not free for commercial use — review the licenses above before any commercial
-deployment.
+**Non-commercial use only.** The integration's code is MIT-licensed, but both data sources above are licensed for non-commercial use only. Check those licenses before using this commercially.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details. This applies to the
-integration's **code**. The bird data it surfaces (Haikubox / BirdNET, and the
-bundled eBird-derived map) is covered by the separate licenses noted under
-**Attribution & data licensing** above, not by the MIT license.
+The code is released under the MIT License (see [LICENSE](LICENSE)). The bird data it displays is covered by the separate licenses above, not by the MIT license.
+
+***
+
+All product names, logos, and brands are property of their respective owners and are used here for identification purposes only. This project is not affiliated with or endorsed by Haikubox, Cornell Lab of Ornithology, or Nabu Casa.

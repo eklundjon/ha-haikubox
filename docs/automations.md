@@ -1,65 +1,37 @@
 # Automations
 
-The integration fires Home Assistant events for noteworthy detections, exposes
-them as **device triggers** in the automation editor, and ships four ready-made
-**blueprints** that turn them into mobile push notifications with the bird's
-photo — or play its call on a speaker.
+The integration fires an event when it hears something worth knowing about. Those events show up as device triggers in the automation editor, and there are four blueprints you can import for photo notifications or playing a bird's call on a speaker.
 
-## Device triggers (the easy path)
+## Device triggers
 
-Every Haikubox device offers these triggers under **Settings → Automations →
-Create → When → Device**:
+Every Haikubox device has these triggers under **Settings → Automations → Create → When → Device**:
 
 | Trigger | Fires when |
 | --- | --- |
-| **New species detected** | A species is heard on this box for the **first time ever** — a genuine lifetime first. |
-| **Unusual visitor detected** | A species the box already knows **returns after a long absence** (default 30 days unheard; see [Tuning](#tuning-the-unusual-visitor-threshold)). |
-| **Watched species detected** | A species **you chose to watch** is heard. Pick the species in **Settings → Devices & Services → Haikubox → Configure** (a list of ones your box has detected, plus a free-text box for ones it hasn't yet). |
+| **New species detected** | The box hears a species for the first time ever. |
+| **Unusual visitor detected** | A species the box already knows comes back after a long absence (30 days by default; see [below](#tuning-the-unusual-visitor-threshold)). |
+| **Watched species detected** | The box hears one of the species you're watching for. Choose them in **Settings → Devices & Services → Haikubox → Configure**. You can pick from birds your box has heard, or type in ones it hasn't heard yet. |
 
-Pick the box, pick the trigger, and add whatever actions you like. The trigger
-makes the detection's details available to your actions through the event data
-described below.
+Pick your box and a trigger, then add whatever actions you want. The detection's details are available to your actions (see the [event reference](#event-reference)).
 
-## Blueprints (push notification in two clicks)
+## Blueprints
 
-Four blueprints ship as starting points — three mobile notifications (one per
-device trigger) plus a media-player one:
+There are four blueprints: one notification for each trigger, plus one that plays the call on a media player.
 
-- **Haikubox — New species notification** (`new_species`) — push with the
-  bird's photo, the running lifetime species count, and tap-through **action
-  buttons** to eBird and Wikipedia.
-- **Haikubox — Unusual visitor notification** (`unusual_visitor`) — push that
-  **attaches the call recording** (so you can play it) when one is cached,
-  falling back to the photo otherwise.
-- **Haikubox — Watched species notification** (`watched_species`) — push with
-  the bird's photo for the species you've chosen in the integration's options
-  (see [Watched species](sensors.md) for the watch-list).
-- **Haikubox — Play the call on a media player** — plays the detection's cached
-  recording on a speaker/display; its trigger type is selectable.
+- **Haikubox — New species notification** sends a notification with the bird's photo, your box's species count, and buttons that open eBird and Wikipedia.
+- **Haikubox — Unusual visitor notification** attaches the bird's recording if there is one, and the photo if not.
+- **Haikubox — Watched species notification** sends a notification with the bird's photo for the species you're watching.
+- **Haikubox — Play the call on a media player** plays the bird's recording on a speaker or display. You choose which trigger starts it.
 
-Each asks which **Haikubox** to watch and either a **mobile-app device** to
-notify or a **media player** to play on; titles/messages are editable.
+Each blueprint asks which Haikubox to use and which phone or media player to send to. You can edit the titles and messages.
 
-These deliberately show off **different event features** — photo, action
-buttons (`ebird_url`/`wikipedia_url`), `lifetime_species_count`, audio
-attachment and media playback (`audio_url`). None of those are tied to a
-particular trigger: **every `haikubox_event` carries the same fields** (see the
-table below), so you can mix and match — e.g. add eBird buttons to the
-unusual-visitor push, or play the call on a new species. Use the shipped
-blueprints as recipes and copy the bits you want.
+The blueprints each show off different things you can do: photos, buttons, the species count, audio. Every event has the same fields, though, so you can mix and match. Want eBird buttons on the unusual visitor notification, or the call played for new species? Copy the parts you want from the other blueprints.
 
-> **Audio caveats.** `audio_url` is a local `/haikubox/cache/...` URL, so it only resolves from
-> inside your HA network, and the clips are **FLAC** — which iOS notification
-> attachments may not play, and some media players don't support. It works best
-> for an in-network media player that handles FLAC. (Audio must also be enabled
-> in the integration options and a clip cached for that detection, or
-> `audio_url` is `null`.)
+> **About audio.** `audio_url` is a local address, so it only works from inside your home network. The clips are FLAC files, which iPhone notifications may not play and some media players don't support. It works best with a media player at home that handles FLAC. `audio_url` is empty unless audio is turned on in the integration's options and a clip was saved for that detection.
 
 ### Importing a blueprint
 
-Blueprints aren't installed with the integration — Home Assistant imports them
-from a URL, one at a time. Click a badge to open the import dialog with the
-blueprint pre-filled:
+Blueprints don't come with the integration. You import each one from its URL. Click a badge to open the import dialog in Home Assistant:
 
 | Blueprint | Import |
 | --- | --- |
@@ -68,8 +40,7 @@ blueprint pre-filled:
 | Haikubox — Watched species notification | [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Feklundjon%2Fha-haikubox%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fhaikubox%2Fwatched_species_notification.yaml) |
 | Haikubox — Play the call on a media player | [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Feklundjon%2Fha-haikubox%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fhaikubox%2Fplay_call_on_media_player.yaml) |
 
-Prefer to do it by hand? Go to **Settings → Automations & scenes → Blueprints →
-Import blueprint** and paste the blueprint's URL:
+To do it by hand, go to **Settings → Automations & scenes → Blueprints → Import blueprint** and paste one of these:
 
 ```
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/new_species_notification.yaml
@@ -78,67 +49,48 @@ https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubo
 https://github.com/eklundjon/ha-haikubox/blob/main/blueprints/automation/haikubox/play_call_on_media_player.yaml
 ```
 
-Then **Settings → Automations & scenes → Create automation → Use blueprint**,
-choose the imported blueprint, and fill in the Haikubox and the device to
-notify.
+Then go to **Settings → Automations & scenes → Create automation → Use blueprint**, pick the blueprint, and choose your Haikubox and the device to notify.
 
-> The bird photo is attached as the notification image. On Android it shows
-> inline; on iOS it appears when you long-press / expand the notification.
+> On Android the photo shows in the notification. On iPhone you'll see it when you long-press or expand the notification.
 
 ## Event reference
 
-Under the hood all three triggers are filtered views of a single bus event,
-`haikubox_event`, discriminated by its `type` field. You can also trigger on
-the raw event (**When → Other → Manual event**, event type `haikubox_event`)
-if you want to react to several boxes at once or match on the payload yourself.
-
-Event data:
+All three triggers use one event, `haikubox_event`, and its `type` field says which kind it is. You can trigger on the event directly (**When → Other → Manual event**, event type `haikubox_event`) if you want one automation for several boxes or want to filter on the fields yourself.
 
 | Field | Description |
 | --- | --- |
-| `type` | `new_species`, `unusual_visitor`, or `watched_species` — which trigger this is. |
-| `device_id` | HA device-registry id of the Haikubox (what the device trigger filters on). |
-| `serial` | The Haikubox serial. |
-| `device_name` | Friendly name of the box. |
-| `species` | Bird common name. |
-| `scientific_name` | Scientific name. |
-| `sp_code` | eBird species code. |
-| `image_url` | Photo URL for the species (may be absent). |
-| `audio_url` | Local `/haikubox/cache/...` URL of the species' cached call recording, or `null` when audio is disabled or no clip is cached. Reachable only from inside your HA network (use it as a notification audio attachment). |
-| `last_seen` | Timestamp of this detection. |
-| `count` | Times this species was heard in the recent (1-hour) window. |
-| `ebird_url` | eBird species page. |
-| `wikipedia_url` | Wikipedia article. |
-| `allaboutbirds_url` | All About Birds species guide. |
-| `macaulay_url` | Macaulay Library media page. |
-| `rarity_score` | Rarity vs. the box's rolling 12-month baseline. |
-| `yearly_rank` | Rank within the rolling 12-month rarity baseline (1 = most common). The field name predates the rolling baseline and is kept for compatibility. |
-| `days_absent` | **`unusual_visitor` only** — days since the previous sighting. |
-| `lifetime_species_count` | **`new_species` only** — total distinct species ever detected on this box, including this one (e.g. "your 87th species"). |
+| `type` | `new_species`, `unusual_visitor` or `watched_species` |
+| `device_id` | The Haikubox's Home Assistant device ID |
+| `serial` | The Haikubox serial |
+| `device_name` | The box's name |
+| `species` | Common name |
+| `scientific_name` | Scientific name |
+| `sp_code` | eBird species code |
+| `image_url` | Photo URL (may be missing) |
+| `audio_url` | Local URL of the saved recording, or `null` if audio is off or there's no clip. Only works from inside your home network. |
+| `last_seen` | When the bird was heard |
+| `count` | How many times it was heard in the last hour |
+| `ebird_url` | eBird page |
+| `wikipedia_url` | Wikipedia article |
+| `allaboutbirds_url` | All About Birds page |
+| `macaulay_url` | Macaulay Library page |
+| `rarity_score` | How rare the bird is at your box over the last 12 months |
+| `yearly_rank` | Where the bird ranks in the last 12 months (1 is the most common) |
+| `days_absent` | `unusual_visitor` only: days since the bird was last heard |
+| `lifetime_species_count` | `new_species` only: how many species your box has ever heard, including this one |
 
-In templates these are reached via `trigger.event.data.<field>` (for example
-`{{ trigger.event.data.species }}`).
+In a template, use `trigger.event.data.<field>`, for example `{{ trigger.event.data.species }}`.
 
-## Tuning the unusual-visitor threshold
+## Tuning the unusual visitor threshold
 
-`unusual_visitor` fires when a known species reappears after at least *N* days
-unheard. *N* defaults to **30 days** and is set per-box in **Settings →
-Devices & services → Haikubox → Configure → "Unusual visitor: days unheard."**
+**Unusual visitor** fires when a bird comes back after at least 30 days away. You can change the number of days per box in **Settings → Devices & Services → Haikubox → Configure → Unusual visitor: days unheard**.
 
-The threshold is built on the integration's persisted last-seen history, so it
-measures the real gap since the species was last heard — independent of the
-rarity baseline, which makes it a more reliable alerting signal than raw rarity.
+It's based on the actual date the bird was last heard, not on rarity, so it's a more reliable thing to alert on.
 
 ## How the events stay quiet
 
-The events are designed not to flood you:
+The events are meant not to flood you:
 
-- **Fresh installs are silent.** Setup pre-seeds the box's species history from
-  the first 24-hour window, so bootstrapping doesn't fire a burst of
-  `new_species` events for birds the box already knew about.
-- **Restarts are silent for `unusual_visitor`.** The first poll of each session
-  only establishes a baseline; it won't replay every long-absent bird that
-  happens to be in the current window.
-- **No re-firing while a bird lingers.** A species that stays present across
-  several polls fires once, not on every poll, because the events trigger on the
-  *edge* of a species entering the recent window.
+- **A new install doesn't fire.** The integration starts by recording every bird heard in the last 24 hours, so you don't get a new species alert for each bird your box already knew.
+- **A restart doesn't fire unusual visitor.** The first check after a restart only gets its bearings.
+- **One alert per visit.** A bird that hangs around for an hour fires once, not every 10 minutes.

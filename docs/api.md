@@ -1,23 +1,23 @@
-# Haikubox API interactions
+# Haikubox API usage
 
-This page documents every network call the integration makes — the endpoints it hits, when, with what parameters, and what it does with the responses. It's intended as a reference for anyone debugging API behaviour, planning rate-limit budgets, or reasoning about offline resilience.
+This page lists every network request the integration makes: which endpoint, when, with what parameters, and what happens to the response. It's meant for debugging, estimating request volume, or understanding what happens when Haikubox is down.
 
-The integration is a one-way **cloud_polling** consumer: it reads from the public Haikubox API and the Haikubox image S3 bucket. It never writes back to the Haikubox cloud.
+The integration only reads. It uses the public Haikubox API and the Haikubox image bucket on S3, and never writes anything back.
 
-## Endpoints at a glance
+## Endpoints
 
-| Endpoint | When called | Auth | Response shape |
+| Endpoint | When | Auth | Response |
 |---|---|---|---|
-| `GET https://api.haikubox.com/haikubox/<serial>` | Config flow (initial setup + reconfigure); also once per coordinator to resolve the box timezone | None | `{ "haikuboxName": "<name>", "tz": "<IANA tz>", … }` |
-| `GET https://api.haikubox.com/haikubox/<serial>/detections?hours=24` | Every poll, once | None | `{ "detections": [ {cn, sn, spCode, dt}, … ] }` |
-| `GET https://api.haikubox.com/haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` | Newly-completed days each poll + a throttled one-time historical backfill | None | `[ { "bird": "<name>", "count": <int> }, … ]` (`404` for dates before the box was installed) |
-| `GET https://haikubox-images.s3.amazonaws.com/<sp_code>.jpeg` | Once per species, lazily | None | Binary JPEG |
+| `GET https://api.haikubox.com/haikubox/<serial>` | Setup and reconfigure; once per coordinator to get the box's time zone | None | `{ "haikuboxName": "<name>", "tz": "<IANA tz>", … }` |
+| `GET https://api.haikubox.com/haikubox/<serial>/detections?hours=24` | Once per poll | None | `{ "detections": [ {cn, sn, spCode, dt}, … ] }` |
+| `GET https://api.haikubox.com/haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` | Newly finished days each poll, plus a one-time history download | None | `[ { "bird": "<name>", "count": <int> }, … ]`, or `404` for days before the box was installed |
+| `GET https://haikubox-images.s3.amazonaws.com/<sp_code>.jpeg` | Once per species | None | JPEG |
 
-All requests use Home Assistant's shared `aiohttp` session via `async_get_clientsession(hass)`. No authentication headers are sent; the serial number in the URL path is the only access token the integration provides.
+All requests use Home Assistant's shared `aiohttp` session (`async_get_clientsession(hass)`). There are no auth headers. The serial in the URL is all Haikubox needs.
 
-Source: [`api.py`](../custom_components/haikubox/api.py) for all HTTP to api.haikubox.com (the polling client + the config-flow device probe); [`const.py`](../custom_components/haikubox/const.py) for base URLs and intervals; [`coordinator.py`](../custom_components/haikubox/coordinator.py) for the poll loop that drives the client; [`config_flow.py`](../custom_components/haikubox/config_flow.py) for setup; [`image_cache.py`](../custom_components/haikubox/image_cache.py) / [`audio_cache.py`](../custom_components/haikubox/audio_cache.py) for media fetching.
+Code: [`api.py`](../custom_components/haikubox/api.py) has all the api.haikubox.com calls. [`const.py`](../custom_components/haikubox/const.py) has the URLs and intervals, [`coordinator.py`](../custom_components/haikubox/coordinator.py) runs the poll, [`config_flow.py`](../custom_components/haikubox/config_flow.py) handles setup, and [`image_cache.py`](../custom_components/haikubox/image_cache.py) and [`audio_cache.py`](../custom_components/haikubox/audio_cache.py) fetch media.
 
-## One poll cycle
+## One poll
 
 ```mermaid
 sequenceDiagram
@@ -52,117 +52,125 @@ sequenceDiagram
     Sensors->>HA: state and attributes updated
 ```
 
-Every call is made **sequentially** today — each `await` waits for the previous one. The daily-count and `/detections` calls could be parallelised with `asyncio.gather`; they aren't, because the Haikubox API's responsiveness has never made it worth the complexity. Backfill requests are also deliberately spaced (a small `BACKFILL_REQUEST_DELAY` between them) so a fresh install doesn't burst the API.
+Requests run one after another. The `/daily-count` and `/detections` calls could run in parallel, but Haikubox responds quickly enough that it hasn't been worth it. History downloads are spaced out on purpose (`BACKFILL_REQUEST_DELAY`) so a new install doesn't hit the API in a burst.
 
-## `GET /haikubox/<serial>` — device info
+## `GET /haikubox/<serial>`: device info
 
-**Where:** [`api.py`](../custom_components/haikubox/api.py) — `async_get_device_info` (the config-flow probe), and `HaikuboxApiClient.async_box_tz` (the once-per-coordinator timezone lookup).
+**Code:** `async_get_device_info` in [`api.py`](../custom_components/haikubox/api.py) for setup, and `HaikuboxApiClient.async_box_tz` for the time zone.
 
-Used during the config flow (initial setup and reconfigure) and once per coordinator to read the box's timezone. In the config flow the outcome forks three ways: a `200` means the serial is valid and the entry is created; **any other status** surfaces as `invalid_serial` ("no shared Haikubox found for that serial"); a network/transport failure (no answer at all) surfaces as `cannot_connect` ("check your connection"). That split lets the UI tell "fix your serial or sharing" apart from "check your network".
+During setup there are three possible outcomes:
 
-The response body is parsed for `haikuboxName`. If present, that becomes the HA device name (e.g. *"Bird Shazam"*); if missing, the integration falls back to `Haikubox <serial>`. The user can still edit the device name in HA's UI afterwards.
+- `200`: the serial is good and the entry is created.
+- Any other status: `invalid_serial` ("No shared Haikubox found for that serial").
+- No response at all: `cannot_connect` ("Could not reach the Haikubox API").
 
-This endpoint is **not** polled — once the entry is created, the device name is captured into `entry.data[CONF_DEVICE_NAME]` and the endpoint is never hit again unless the user runs Reconfigure.
+Keeping those last two apart lets the user know whether to check their serial or their network.
 
-## `GET /haikubox/<serial>/detections?hours=24` — detection feed
+`haikuboxName` from the response becomes the device name, for example "Bird Shazam". If it's missing, the name is `Haikubox <serial>`. The user can rename the device afterwards.
 
-**Where:** [`api.py`](../custom_components/haikubox/api.py) — `HaikuboxApiClient.fetch_detections` (called via the coordinator's thin `_fetch_detections` wrapper)
+After setup the name is stored in `entry.data[CONF_DEVICE_NAME]`, and this endpoint is only called again for the time zone or if the user reconfigures.
 
-The endpoint accepts integer `hours` in `1..24` and returns a flat list of every detection inside that trailing window. The integration calls it **once per poll**, always with `hours=24`. Everything else — the 1-hour `recent_detections` sensor, the `last_detection` event cache, new-species tracking, the 7-day rarity store — is derived from that single response by filtering the raw items client-side on their `dt` timestamps.
+## `GET /haikubox/<serial>/detections?hours=24`: detections
 
-The response passes through `_normalise_detections` ([coordinator.py](../custom_components/haikubox/coordinator.py)) which:
+**Code:** `HaikuboxApiClient.fetch_detections` in [`api.py`](../custom_components/haikubox/api.py), called through the coordinator's `_fetch_detections`.
 
-1. Drops the `soundscape` non-bird entries.
-2. Collapses the flat list to **one record per species**, summing detection counts and keeping the latest `dt` (timestamp) as `last_seen`.
-3. Re-keys API fields to internal names:
+`hours` can be 1 to 24. The integration always asks for 24, once per poll. Everything else comes from that one response by filtering on each item's `dt`: the 1-hour `recent_detections`, the `last_detection` event list, new-species tracking, and today's part of the 7-day rarest list.
 
-| API field | Internal field |
+`_normalise_detections` in [`normalize.py`](../custom_components/haikubox/normalize.py) then:
+
+1. Drops `soundscape` entries, which aren't birds.
+2. Merges the list into one record per species, adding up the counts and keeping the latest `dt` as `last_seen`.
+3. Renames the fields:
+
+| API field | Integration field |
 |---|---|
 | `cn` | `species` (common name) |
 | `sn` | `scientific_name` |
 | `spCode` | `sp_code` |
 | `dt` | `last_seen` (ISO 8601) |
 
-Records are sorted by `last_seen` descending. Rarity scores (`rarity_score`, `yearly_rank`) are then layered on by `_apply_rarity_scores` against the trailing-window rarity baseline (see below).
+Records are sorted newest first. `_apply_rarity_scores` then adds `rarity_score` and `yearly_rank` from the rarity baseline (below).
 
-### Deriving the recent window
+### The recent window
 
-A `_filter_by_dt(raw, threshold)` helper picks the raw detection items whose `dt` is at or after `now − RECENT_WINDOW_HOURS` (1 hour by default). The filtered raw list is then run through `_normalise_detections` independently of the 24-hour normalisation. **Filtering happens before normalisation** so the per-species `count` on `recent_detections` records reflects detections-in-the-last-hour, not detections-in-the-last-24-hours — the wider 24-hour `count` ends up on `daily_count` / `daily_top_species` items where it belongs.
+`_filter_by_dt(raw, threshold)` keeps the raw items with `dt` within the last `RECENT_WINDOW_HOURS` (1 by default). That filtered list is normalized separately from the 24-hour list. Filtering happens first so that `count` on `recent_detections` means "times heard in the last hour", not "in the last 24 hours".
 
-The integration's clock and the API's `dt` timestamps both live in UTC; the filter parses `dt` with `datetime.fromisoformat` (tolerant of the `Z` suffix from Python 3.11+) and falls back to assuming UTC if no timezone is present in the string. Bad/missing `dt` values are dropped silently.
+Both the integration's clock and `dt` are in UTC. `dt` is parsed with `datetime.fromisoformat`, which accepts a trailing `Z` on Python 3.11 and later. A `dt` with no time zone is assumed to be UTC, and a missing or unreadable `dt` is skipped.
 
-| Sensor / pipeline | Window source |
+| Sensor or feature | Data used |
 |---|---|
-| `recent_detections`, recent-window new-species tracker | Recent subset (client-side filter, 1 h) |
-| `daily_count`, `daily_top_species`, `notable_species`, today's contribution to `rarest_species`, the fresh-install `_seen_species` bootstrap | Full 24-hour normalisation |
-| `last_detection.detections` (per-event log) | Persisted rolling cache, fed each poll from the 24-hour raw payload (top 50 by `dt`); survives outages — #62 |
-| `new_species.detections` (lifetime history) | `_seen_species` log (sticky across polls and restarts) |
+| `recent_detections`, new-species tracking | Items from the last hour |
+| `daily_count`, `daily_top_species`, `notable_species`, today's part of `rarest_species`, the first-install `_seen_species` seed | All 24 hours |
+| `last_detection.detections` | A saved list of the last 50 detections, topped up from each poll's 24-hour data |
+| `new_species.detections` | The saved `_seen_species` log |
 
-### Polling cost
+### Request volume
 
-One `/detections` call per poll — at the default 10-minute interval that's **144 detection calls per box per day** (the interval is user-tunable to 5–60 min; see [docs/advanced.md](advanced.md)), plus roughly **one `/daily-count` fetch per day** in steady state (the newly-completed day), and per-species image fetches (write-once). On a *fresh* install there's also a one-time historical backfill — `RARITY_BACKFILL_CHUNK` (30) days per poll while the trailing year is still being covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for older history — each request spaced by `BACKFILL_REQUEST_DELAY` and walking back to the box's install date. It spreads over an hour or two for the rarity-relevant year, longer for the deep tail, rather than firing in one burst. Comfortably within any sensible rate budget.
+One `/detections` call per poll, so 144 a day per box at the default 10 minutes. The interval can be anything from 5 to 60 minutes (see [advanced.md](advanced.md)). On top of that there's about one `/daily-count` call a day once history is downloaded, and one image per species, ever.
 
-## `GET /haikubox/<serial>/daily-count?date=<YYYY-MM-DD>` — rarity baseline
+A new install also downloads its history. It fetches `RARITY_BACKFILL_CHUNK` (30) days per poll until it has a year, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for anything older, with `BACKFILL_REQUEST_DELAY` between requests, back to the day the box was installed. The first year takes an hour or two and older history longer.
 
-**Where:** [`api.py`](../custom_components/haikubox/api.py) — `HaikuboxApiClient.fetch_daily_count` (called via the coordinator's `_fetch_daily_count` wrapper), driven by `_ensure_daily_counts`
+## `GET /haikubox/<serial>/daily-count?date=<YYYY-MM-DD>`: daily counts
 
-Returns one calendar day's per-species counts as a flat list (`[{bird, count}]`). Crucially it accepts an arbitrary **historical** `date`, which lets the integration build its **own rolling rarity baseline** instead of relying on the calendar-year `/yearly-count` endpoint. A calendar-year baseline resets every Jan 1 (rarity inflates and `notable`/`rarest` churn) and drifts within the year as its denominator grows; a self-built trailing window has neither problem.
+**Code:** `HaikuboxApiClient.fetch_daily_count` in [`api.py`](../custom_components/haikubox/api.py), called through `_fetch_daily_count` and driven by `_ensure_daily_counts`.
 
-**The store.** Per-day counts accumulate in `.storage/haikubox.<serial>.daily_counts` as `{ "YYYY-MM-DD": { species: count } }`, **completed days only**, kept for the box's full lifetime (a reusable dataset). Each poll, `_ensure_daily_counts`:
+Returns one calendar day's count per species as `[{bird, count}]`. The useful part is that it accepts any past `date`, so the integration can build its own rolling 12-month rarity baseline. The alternative, `/yearly-count`, covers the calendar year: it resets every January 1st, and rarity drifts as the year goes on.
 
-1. **Forward-fills** any newly-completed day(s) since the last run (newest-first, until it reaches data it already has).
-2. **Backfills** older history toward the install date — `RARITY_BACKFILL_CHUNK` (30) days per poll until the trailing `RARITY_WINDOW_DAYS` is covered, then `HISTORY_BACKFILL_CHUNK` (10) days per poll for the deep-history tail — each spaced by `BACKFILL_REQUEST_DELAY`. A `404` means "before the box existed" — after `BACKFILL_STOP_AFTER_404` (14) consecutive 404s while extending older than all known data the backfill is marked complete (generous enough to walk through a multi-day outage and resume on real data beyond it).
-3. Persists once if anything changed (a `try/finally` ensures partial progress survives a mid-chunk failure or restart) — ~1 write/day in steady state.
+**Storage.** Daily counts are saved in `.storage/haikubox.<serial>.daily_counts` as `{ "YYYY-MM-DD": { species: count } }`. Only finished days are stored, and they're kept for the life of the box. Each poll, `_ensure_daily_counts`:
 
-**Scoring.** `_rebuild_baseline` aggregates the trailing **`RARITY_WINDOW_DAYS`** (365) of stored counts into a `{species → rank}` map via `_ranks_from_counts`. That's what rarity divides by — a species ranked 50 of 200 scores `50/200 = 0.25`; an absent species scores `1.0` (capped, tied with the rarest known species). Because it's a sliding window, the same species' rarity stays stable across a calendar year-end instead of jumping.
+1. Fetches any days that have finished since the last run, newest first, until it reaches days it already has.
+2. Fetches older history toward the install date, `RARITY_BACKFILL_CHUNK` (30) days per poll until `RARITY_WINDOW_DAYS` is covered, then `HISTORY_BACKFILL_CHUNK` (10) per poll, spaced by `BACKFILL_REQUEST_DELAY`. A `404` means the box didn't exist yet. After `BACKFILL_STOP_AFTER_404` (14) 404s in a row older than anything stored, the download is marked complete. Fourteen is enough to get past an outage of several days and keep going.
+3. Saves once if anything changed. A `try/finally` keeps partial progress if a download is interrupted. Once history is complete, that's about one write a day.
 
-**Resilience.** The store rehydrates `_daily_counts` in [`_async_setup`](../custom_components/haikubox/coordinator.py) and the baseline is rebuilt at load, so rarity works immediately on restart from cached history. A `404`/empty body is "no data for that day" (never an error). A `429`/5xx during backfill is captured: backfill pauses until the next poll (a natural backoff) and the 404 floor is **not** advanced, so a transient limit can't be mistaken for the install boundary. Only a true fresh install whose very first backfill found no data raises `UpdateFailed` (sensors `unavailable` until HA's automatic retry succeeds).
+**Scoring.** `_rebuild_baseline` adds up the last `RARITY_WINDOW_DAYS` (365) of stored counts and turns them into a species → rank map with `_ranks_from_counts`. Rarity is the rank divided by the number of species: ranked 50th of 200 scores 0.25. A species that isn't in the map scores 1.0, the same as the rarest species that is. Because the window rolls, a species' score doesn't jump at New Year.
 
-## Image CDN
+**Failures.** `_async_setup` loads `_daily_counts` and rebuilds the baseline at startup, so rarity works right away after a restart. A `404` or empty response means no data for that day and isn't an error. A `429` or 5xx during the history download stops the download until the next poll, and doesn't count toward the 404 limit, so a rate limit can't be mistaken for the install date. The only case that raises `UpdateFailed` is a brand-new install whose very first download finds nothing. The sensors are unavailable until Home Assistant's automatic retry succeeds.
 
-**Where:** [`image_cache.py`](../custom_components/haikubox/image_cache.py)
+## Images
 
-Bird photos are fetched directly from `https://haikubox-images.s3.amazonaws.com/<sp_code>.jpeg`. The S3 bucket is public; no auth.
+**Code:** [`image_cache.py`](../custom_components/haikubox/image_cache.py)
 
-The cache is write-once-per-species:
+Photos come from `https://haikubox-images.s3.amazonaws.com/<sp_code>.jpeg`, a public bucket.
 
-1. On every detection, the coordinator calls `ImageCache.async_fetch(sp_code)`.
-2. If the species code is already in the in-memory `_cached` set, the local URL is returned without touching the network.
-3. Otherwise, the JPEG is downloaded (`aiohttp` GET), written to `/config/haikubox/<sp_code>.jpeg` via `aiofiles`, and added to `_cached`.
-4. The species's `image_url` is rewritten to `/haikubox/cache/<sp_code>.jpeg` — served by the integration's **own** static path (registered in `async_setup`, with the directory created first), so it works offline once cached and doesn't depend on HA's `/local` being mounted.
+Each species is downloaded once:
 
-If the S3 fetch fails (404, network error), `async_fetch` falls back to returning the remote S3 URL — the card shows the photo on first paint, and the next successful poll caches it. `url_for(sp_code)` (used by `_build_today_top` / `_build_baseline_top` for non-1h-window species) applies the same fallback synchronously.
+1. For each detection, the coordinator calls `ImageCache.async_fetch(sp_code)`.
+2. If the code is already in the in-memory `_cached` set, the local URL comes back without a request.
+3. Otherwise the JPEG is downloaded, written to `/config/haikubox/<sp_code>.jpeg` with `aiofiles`, and added to `_cached`.
+4. `image_url` becomes `/haikubox/cache/<sp_code>.jpeg`. That path is served by the integration itself (registered in `async_setup`, after creating the folder), so it works offline and doesn't depend on HA's `/local`.
 
-The cache directory is indexed once at integration startup (`async_init` → `_index`, single executor hop to scan `/config/haikubox/`). After that, every URL lookup is an in-memory set check.
+If the download fails, `async_fetch` returns the S3 URL instead. The card can still show the photo, and the next poll tries to save it again. `url_for(sp_code)`, used by `_build_today_top` and `_build_baseline_top`, does the same thing without downloading.
 
-## Polling cadence
+The cache folder is scanned once at startup (`async_init` → `_index`). After that, every lookup is an in-memory check.
 
-| Constant | Value | Source |
+## Polling
+
+| Constant | Value | Where |
 |---|---|---|
-| `DEFAULT_SCAN_INTERVAL` | 600 s (10 min) — user-tunable 5–60 min | [`const.py`](../custom_components/haikubox/const.py) |
-| `RECENT_WINDOW_HOURS` | 1 (h) — client-side filter, not an API parameter; user-tunable 1–24 h | [`const.py`](../custom_components/haikubox/const.py) |
-| `DAILY_WINDOW_HOURS` | 24 (h) | [`const.py`](../custom_components/haikubox/const.py) |
+| `DEFAULT_SCAN_INTERVAL` | 600 s (10 min); adjustable 5–60 min | [`const.py`](../custom_components/haikubox/const.py) |
+| `RECENT_WINDOW_HOURS` | 1 h; applied by the integration, not sent to the API; adjustable 1–24 h | [`const.py`](../custom_components/haikubox/const.py) |
+| `DAILY_WINDOW_HOURS` | 24 h | [`const.py`](../custom_components/haikubox/const.py) |
 
-`RECENT_WINDOW_HOURS = 1` gives a 6× overlap against the default 10-minute poll interval — a single missed poll never loses recent detections, because the next poll's 24-hour fetch (and 1-hour client-side filter) re-includes anything the missed poll would have seen. `DAILY_WINDOW_HOURS = 24` is the API's documented maximum; bigger windows would need server-side aggregation that the public endpoint doesn't expose.
+Each poll asks for 24 hours of data, so a missed poll loses nothing: the next one picks up the same detections. 24 hours is the most the API allows.
 
-Both the poll interval and the recent window are exposed in the options flow's **Advanced** section (along with the rarity and new-species windows) — see [docs/advanced.md](advanced.md). For a schedule-based cadence or polling outside the 5–60 min range, turn off HA's "Enable polling for updates" toggle and drive the refresh from a time-pattern automation (also in advanced.md).
+The poll interval and recent window are in the options flow's **Advanced** section, along with the rarity and new-species windows (see [advanced.md](advanced.md)). For polling on a schedule, or outside 5–60 minutes, turn off Home Assistant's **Enable polling for updates** and refresh from an automation (also in advanced.md).
 
 ## Failure handling
 
-| Failure | Behaviour |
+| Failure | What happens |
 |---|---|
-| `/detections` raises `aiohttp.ClientError` | `_async_update_data` raises `UpdateFailed`; HA marks sensors `unavailable` until the next successful poll |
-| `/daily-count` returns `404` | Treated as "no data for that day" / the pre-install floor — never an error |
-| `/daily-count` returns `429` or 5xx during backfill | Captured: backfill pauses until the next poll (natural backoff), partial progress persisted, the 404 floor is **not** advanced |
-| `/daily-count` connection error during backfill, cached history available | Warning logged; baseline rebuilt from cached history; backfill retried next poll |
-| No cached daily history AND the first backfill finds nothing | `UpdateFailed` raised — sensors `unavailable` until the next poll succeeds. HA retries automatically on a fresh install's first refresh |
-| Image S3 fetch returns non-200 | Card falls back to the remote S3 URL; next poll retries the cache write |
-| Image S3 fetch raises | Same — remote URL returned; failure is logged at DEBUG |
-| `/haikubox/<serial>` (device info) returns non-200 | Config flow surfaces `invalid_serial` ("no shared Haikubox found"); entry is not created |
-| `/haikubox/<serial>` (device info) raises `aiohttp.ClientError` | Config flow surfaces `cannot_connect` ("check your connection"); entry is not created |
+| `/detections` raises `aiohttp.ClientError` | `_async_update_data` raises `UpdateFailed`, and sensors are unavailable until the next good poll |
+| `/daily-count` returns `404` | No data for that day, or the box didn't exist yet. Not an error. |
+| `/daily-count` returns `429` or 5xx during history download | Download stops until the next poll, progress is saved, the 404 count isn't advanced |
+| `/daily-count` connection error during history download, with saved history | Warning logged, baseline rebuilt from saved history, download retried next poll |
+| No saved history and the first download finds nothing | `UpdateFailed`; sensors unavailable until the next good poll. HA retries a new install's first refresh automatically. |
+| Image download returns non-200 | Card uses the S3 URL; the next poll tries to save it again |
+| Image download raises | Same, and it's logged at DEBUG |
+| `/haikubox/<serial>` returns non-200 during setup | `invalid_serial` ("No shared Haikubox found"); no entry created |
+| `/haikubox/<serial>` raises `aiohttp.ClientError` during setup | `cannot_connect` ("Could not reach the Haikubox API"); no entry created |
 
-The integration does **not** retry within a single poll. Failed calls just wait for the next poll tick — HA's coordinator does the right thing on its own.
+Failed requests aren't retried within a poll. The next poll tries again.
 
 ## Diagnostics
 
-The diagnostics download bundle ([`diagnostics.py`](../custom_components/haikubox/diagnostics.py)) includes the full coordinator data and entry data, with the serial number redacted. It's safe to attach to a bug report.
+The diagnostics download ([`diagnostics.py`](../custom_components/haikubox/diagnostics.py)) includes the coordinator's data and the entry's data, with the serial removed. It's safe to attach to a bug report.

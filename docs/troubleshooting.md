@@ -1,64 +1,59 @@
 # Troubleshooting
 
-## Config flow rejects the serial number
+## Setup rejects my serial number
 
-The integration calls `GET https://api.haikubox.com/haikubox/<serial>` to validate your serial during setup, and the error message tells you which kind of failure it was:
+When you add the integration, it checks your serial with Haikubox. There are two possible errors:
 
-- **"No shared Haikubox found for that serial..."** — the API answered but rejected the lookup (a wrong serial, or a box that isn't shared). This is the common case; the two causes below cover it.
-- **"Could not reach the Haikubox API. Check your internet connection..."** — the request never got an answer at all (a network/transport failure). That points at connectivity on the HA host, not your serial or sharing setting.
+- **No shared Haikubox found for that serial.** Haikubox answered, but doesn't know a shared box with that serial. Either the serial is wrong or the box isn't shared.
+- **Could not reach the Haikubox API.** Home Assistant couldn't connect to Haikubox. Check the internet connection on your Home Assistant machine.
 
-The endpoint returns device info for *publicly shareable* boxes and an HTTP non-200 for everything else, so any non-200 becomes the "No shared Haikubox found" message and only a true transport error becomes "Could not reach the Haikubox API."
+For *No shared Haikubox found*:
 
-Two common causes of the "No shared Haikubox found" rejection:
+1. **Check the serial.** It's a hex code, and its length depends on the model (for example `100000003d7c9f2b`). The easiest place to find it is your public URL, `https://birds.haikubox.com/listen/<serial>`, which appears once sharing is on. Some boxes have the serial printed on the base, but newer ones may not.
+2. **Turn on sharing.** Boxes aren't shared by default, and Haikubox won't answer for a box that isn't shared, even with the right serial.
+   1. Log in to [listen.haikubox.com](https://listen.haikubox.com).
+   2. Turn on **Share your haikubox with friends**. Your public URL appears once it's on, which confirms the setting took and shows your serial.
+   3. Try adding the integration again.
 
-1. **Wrong serial.** The serial is a hexadecimal code whose length varies by model (e.g. `100000003d7c9f2b`). The reliable place to read it is your public URL, shown once sharing is enabled (see below) — `https://birds.haikubox.com/listen/<serial>`. Some units also have it printed on the base, but newer ones may not.
+The integration only uses Haikubox's public API, so sharing has to stay on for it to work.
 
-2. **Box is private.** By default a Haikubox is **not** shareable — even with the correct serial, the API will reject the lookup. Make it shareable:
-   1. Log into [listen.haikubox.com](https://listen.haikubox.com).
-   2. Turn on the **"Share your haikubox with friends"** setting. Once enabled, the site will start showing your public URL (`https://birds.haikubox.com/listen/<serial>`) — that's both a confirmation the toggle took effect *and* a convenient way to read your serial off the screen.
-   3. Re-run the **Add Integration** flow in Home Assistant.
+The same page has a **Make Private: Hide this Haikubox on the map** setting. That only controls the public map at birds.haikubox.com and has no effect on this integration. The one that matters is **Share your haikubox with friends**.
 
-The integration only reads from the public API, so the sharing setting is required for the integration to function at all.
+## Sensors are empty right after installing
 
-Don't be confused by the nearby **"Make Private: Hide this Haikubox on the map"** toggle on the same settings page — that controls whether your box shows up on the public birds.haikubox.com map and has **no effect** on API access. You can leave it set either way without breaking this integration. The toggle that matters for HA is **"Share your haikubox with friends"**.
+Most sensors fill in on the first poll, within about 10 minutes, as long as your box has heard something in the last 24 hours. Some take longer:
 
-## Sensors show `0` or `unknown` right after install
+- `recent_detections` is empty during any hour the box doesn't hear anything.
+- `last_detection`, `notable_species` and `new_species` fill in on the first poll if the box has heard anything in the last 24 hours.
+- `daily_top_species` and `daily_count` fill in on the first poll.
+- `yearly_top_species` needs your box's history. On a new install the integration downloads it a month at a time, gently enough not to hammer Haikubox's servers. The last 12 months take an hour or two. `notable_species` and `rarest_species` get more accurate as it fills in.
+- `rarest_species` only needs the last week of history, which comes with the first poll.
+- `lifetime_species_count` starts with the species heard in the last 24 hours and grows from there. The integration can only see back 24 hours on the first day, so a species first heard in that window gets its earliest time in that window as its "first heard" date.
 
-Every poll fetches a 24-hour detection window from the Haikubox API, so most sensors populate on poll 1 if your box has any recent activity. A few have a longer fill horizon — here's what to expect:
+## `last_detection` or `notable_species` shows `unknown`
 
-- `recent_detections` — populates on the first poll that returns any detections in the last hour. Empty between active hours.
-- `last_detection`, `notable_species`, `new_species` — populate on the first poll that returns detections in the last 24 hours, so within ~10 minutes of install if your box is active. `last_detection` then persists (rolling event cache, survives restarts/outages) and `new_species` persists (lifetime log); `notable_species` is an observation window and goes `unknown` after 24 h with nothing detected.
-- `daily_top_species`, `daily_count` — populate on the first poll from the full 24-hour API response. The trailing window slides every poll; counts rise and fall as old detections age past 24h and new ones arrive.
-- `yearly_top_species` — the top species over a rolling 12-month window, built from per-day `/daily-count` history. On a fresh install it starts from the first backfilled chunk, then fills in over the next hour or two as the historical backfill walks back (~30 days/poll until the trailing year is covered, then slower for older history — throttled to be kind to the API). Rarity-derived sensors (`notable_species`, `rarest_species`) sharpen as that window fills.
-- `rarest_species` — derived from the same per-day history; its 7-day window is available as soon as the backfill has fetched the last week (typically the first poll, which grabs ~30 days).
-- `lifetime_species_count` starts at the 24-hour bootstrap count and climbs as new species come in. Bootstrap-seeded species use their **earliest** dt in that first 24-hour window as `first_seen` (not the most recent — the real first observation we can see). Truly new species detected later get exact first-seen timestamps from their actual detection events.
+These two behave differently:
 
-## `last_detection` / `notable_species` are `unknown`
+- **`last_detection`** is kept through restarts and outages, and always shows the last bird heard, however long ago. It's only `unknown` before your box's first ever detection. If it's `unknown` on a box that has been running a while, check the Home Assistant logs.
+- **`notable_species`** only looks at the last 24 hours, so it's `unknown` whenever the box hasn't heard anything in that time. That usually means the box is offline. Check the Haikubox app to see if it's still hearing birds.
 
-These two behave differently on purpose (see #62):
+## Cards don't show up in the card picker
 
-- **`last_detection`** persists — it reads a rolling cache of the most recent detection events (`.storage/haikubox.<serial>.recent_events`), rehydrated on startup, so it survives HA restarts *and* box outages. "The last detection" is the last detection regardless of age. It's only `unknown` before the box's very first detection; if it's `unknown` on an established box, check HA logs.
-- **`notable_species`** is deliberately *not* persisted — it means "most notable species observed in the last 24 h", so it correctly drops to `unknown` (with the bird-off icon) when nothing has been detected in 24 h. During a connectivity/hardware outage that's the expected signal — check the Haikubox app to confirm the box is actually hearing birds.
+The cards install themselves, so you don't need to add them under dashboard resources. If they aren't in the card picker after installing:
 
-## Custom cards don't appear in the dashboard editor
-
-The integration registers `haikubox-bird-card` and `haikubox-bird-list-card` automatically on startup; you don't need to add them as Lovelace resources.
-
-If the card picker doesn't list them after install:
-
-1. Restart Home Assistant once. Card registration runs during integration setup.
-2. Hard-refresh your dashboard (browser reload bypassing cache, e.g. **⇧⌘R** / **Ctrl-F5**). HACS-served JS is cached aggressively.
-3. Check **Settings → System → Logs** for `haikubox` setup errors — if setup failed, the cards never got registered.
+1. Restart Home Assistant. The cards are set up when the integration loads.
+2. Force-refresh your browser (**⇧⌘R** or **Ctrl-F5**).
+3. Look in **Settings → System → Logs** for Haikubox errors. If the integration didn't load, the cards weren't set up either.
 
 ## Cards show "Custom element doesn't exist" after a restart
 
-**Why it happens.** Home Assistant serves the dashboard page before custom integrations have finished setting up, and only includes the card JavaScript that had been registered when the page was served. A browser or Companion app that reconnects after a restart reloads the page right away, before the Haikubox integration has registered its cards, so it gets a page without them. Without a fix, every Haikubox card on that page shows an error until you refresh.
+Home Assistant starts serving the dashboard before integrations like this one have finished loading. A browser or the Home Assistant app that reconnects during a restart can load the dashboard in that gap, before the cards exist.
 
-**What the integration does about it.** On setup it copies a small loader to `config/www/haikubox-card-loader.js` and adds it as a dashboard resource (**Settings → Dashboards → ⋮ → Resources**, URL `/local/haikubox-card-loader.js?v=<version>`). Home Assistant serves `/local` from the moment its web server starts, so the loader is always on the page. It keeps retrying the card imports until the integration is up, and the error cards then turn into working cards without a refresh. Don't delete that resource; it's removed automatically when you remove the last Haikubox device.
+To handle this, the integration puts a small loader at `config/www/haikubox-card-loader.js` and adds it to your dashboard resources (**Settings → Dashboards → ⋮ → Resources**). The loader waits for the integration to finish loading and then brings the cards in, so they appear without a refresh. Please don't delete that resource. It's removed automatically when you remove your last Haikubox.
 
-**If it still happens:**
+If you still see the error:
 
-1. **YAML-mode dashboards** (`lovelace: mode: yaml`) can't have resources added by integrations. Add it yourself:
+1. **YAML dashboards** (`lovelace: mode: yaml`) have to list the loader themselves:
    ```yaml
    lovelace:
      mode: yaml
@@ -66,21 +61,17 @@ If the card picker doesn't list them after install:
        - url: /local/haikubox-card-loader.js
          type: module
    ```
-   A hand-written URL can't carry the release version the way the automatic resource does. So on a page loaded during startup just after an upgrade, the browser may reuse its cached copy of the old card code. A hard refresh fixes that.
-2. **First restart after installing** — Home Assistant only serves `/local` if `config/www` existed when it started. If the integration had to create that folder, the loader starts working from the next restart.
+   Right after an upgrade, a YAML dashboard may show the old version of the cards once. A force-refresh fixes it.
+2. **First restart after installing.** Home Assistant only serves files from `config/www` if that folder existed when it started. If the integration had to create it, the loader starts working after your next restart.
 
-## Cards show the placeholder bird (🐦) after upgrading the integration
+## Cards show 🐦 instead of photos after an upgrade
 
-If an HA dashboard tab was open during an integration upgrade, you may see `haikubox-bird-card` swap from real photos to the 🐦 placeholder for sensors that were rendering normally before. This is one-time post-upgrade behaviour, not a hardware or data issue.
+If a dashboard was open while you upgraded the integration, cards may switch to the 🐦 placeholder. The open page is still running the old card code, which doesn't understand the new version's data. Force-refresh the page (**⇧⌘R** or **Ctrl-F5**) and the photos come back.
 
-**Why it happens.** Some releases change which attributes a sensor exposes (for example, 0.5.0 moved `image_url` / `scientific_name` / `sp_code` / `last_seen` off the top-level attributes of `last_detection` / `notable_species` / `new_species` and into the per-record `detections` list). The integration version-busts its card JS URL on every release so the browser will fetch the new JS on the next page load — but an *already-open* dashboard tab keeps running the prior version's JS until it reloads. When that older JS reads the attribute layout the upgraded integration is producing, it doesn't find what it expects, and the card's empty-state fallback renders instead of the photo.
+## Entity IDs don't match the docs
 
-**Fix.** Hard-refresh the dashboard once (**⇧⌘R** / **Ctrl-F5**). One-time per browser per major upgrade.
-
-## Sensor entity IDs don't match the docs
-
-The IDs above assume the default device name **"Bird Shazam"**. If your box has a different name, sensors are prefixed with `sensor.<your_device_name>_*` — for example `sensor.backyard_box_last_detection`. The suffix (`last_detection`, `notable_species`, etc.) is stable across installs.
+The examples use my box's name, "Bird Shazam". Your sensors will be named after your box instead, for example `sensor.backyard_box_last_detection`. The end of the name (`last_detection`, `notable_species` and so on) is always the same.
 
 ## Upgrading from 0.3.x
 
-0.4.0 is a breaking release. Most 0.3.x entities are migrated automatically by a one-time unique-id shim — your history is preserved — but the `daily_species` sensor was removed and is not migrated. Re-point any automations or dashboards that referenced it at `daily_top_species` (which exposes the same ranked list under the new `detections` contract).
+0.4.0 renamed most sensors. Your existing sensors are moved to the new names automatically and keep their history. The exception is `daily_species`, which was removed. Change any automations or cards that used it to `daily_top_species`, which has the same list.

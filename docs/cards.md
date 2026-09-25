@@ -1,21 +1,21 @@
 # Custom cards
 
-The integration registers two custom Lovelace cards automatically — no manual resource configuration required.
+The integration comes with two dashboard cards. They install themselves, so there's nothing to add under dashboard resources.
 
-- [`haikubox-bird-card`](#haikubox-bird-card) — single bird, photo + species + relative timestamp
-- [`haikubox-bird-list-card`](#haikubox-bird-list-card) — ranked list with tap-to-expand detail rows
-- [Dashboard example](#dashboard-example) — three-column details view using the sections layout
-- [Visual editor](#visual-editor) — both cards expose a UI editor in the dashboard's card editor
-- [Theming](#theming) — CSS variables both cards honour
-- [Troubleshooting](#troubleshooting) — common questions
+- [`haikubox-bird-card`](#haikubox-bird-card) shows one bird: photo, name and how long ago it was heard.
+- [`haikubox-bird-list-card`](#haikubox-bird-list-card) shows a ranked list of birds. Tap a row for details.
+- [Dashboard example](#dashboard-example)
+- [Visual editor](#visual-editor)
+- [Theming](#theming)
+- [Troubleshooting](#troubleshooting)
 
-Both cards work on **Home Assistant 2025.4+** (the integration's minimum; the cards themselves only need the sections grid sizing API and modern container queries, which have been available since 2024.12).
+Both cards need Home Assistant 2025.4 or later, the same as the integration.
 
 ---
 
 ## `haikubox-bird-card`
 
-Displays a single bird detection with a photo, species name, scientific name, and a relative timestamp.
+Shows a single bird with its photo, common and scientific names, and how long ago it was heard.
 
 ```yaml
 type: custom:haikubox-bird-card
@@ -25,24 +25,31 @@ grid_options:
   rows: 4
 ```
 
-The card is fully responsive to both width and height:
+The card adjusts to whatever size you give it:
 
-- **Portrait** — photo fills the card width up to a square (1:1), text is centred below. When space is tight, the scientific name is dropped and the photo shrinks to maintain at most a 3:2 aspect ratio.
-- **Wide** — when the card is wider than 3:2, the photo moves to the left and text appears on the right.
-- **Text scales with the card.** The species name, scientific name, and timestamp grow as the card grows (via container-query units), so a large card reads at a distance and a small one stays compact. The common name scales most aggressively; sizes are bounded so they never get comically large or unreadably small.
+- **Tall or square cards** put the photo on top and the text underneath. On short cards the photo gets shorter to make room for the text.
+- **Wide cards** (wider than 3:2) put the photo on the left and the text on the right.
+- **Text size** grows and shrinks with the card, so a big card can be read from across the room.
 
-The card ships sensible size defaults via `getGridOptions()`; resize it from the card's **Layout** tab in the dashboard editor, or set `grid_options` (`columns`, `rows`) in YAML. It adapts gracefully at any reasonable aspect ratio.
+You can resize the card from the **Layout** tab in the card editor, or with `grid_options` in YAML.
 
-Works with any **list-bearing** Haikubox sensor — the 8 that expose a per-species `detections` list (`recent_detections`, `last_detection`, `daily_top_species`, `notable_species`, `new_species`, `yearly_top_species`, `rarest_species`, `watched_species`). The numeric/diagnostic sensors (`daily_count`, `lifetime_species`, `species_diversity`, `activity_level`, `new_species_window`, `history_start`) have no list and aren't offered. By default the card renders the **top-ranked** record (the #1 entry by that sensor's own measure). Empty list → empty card showing "No recent detections."
+The card works with any Haikubox sensor that has a `detections` list: `recent_detections`, `last_detection`, `daily_top_species`, `notable_species`, `new_species`, `yearly_top_species`, `rarest_species` and `watched_species`. It shows the top-ranked bird from that list. If the list is empty, the card says "No recent detections."
 
-The relative timestamp ("5m ago", "2h ago") refreshes every 60 seconds independently of the sensor's poll cadence, so the label stays honest between the 10-minute poll intervals.
+The "5m ago" label updates every minute, so it stays accurate between polls.
 
-### Showing a different rank (`position`)
+### Buttons on the photo
 
-By default the card shows the top-ranked bird. Set `position` (1-based) to show a different rank — `1` is the top, `2` the second, and so on. This is handy for building a **column of single-bird cards**, each surfacing a different rank from the same sensor:
+Two round buttons sit on top of the photo:
+
+- **▶** plays the bird's call, if a recording is available. It only appears if you've turned on audio in the integration's options (see [Play the call](#play-the-call-audio)). Hide it with `show_audio: false`.
+- **ⓘ** opens a popup with the same details view the list card uses: a larger photo, the Wikipedia description and reference links. Hide it with `show_details: false`.
+
+### Showing a different bird (`position`)
+
+The card normally shows the #1 bird. Set `position` to show a different one: `1` is the top, `2` is second, and so on. This lets you stack a few cards that each show a different bird from the same sensor:
 
 ```yaml
-# Three stacked cards showing the top three of the last 24 hours
+# The top three birds of the last 24 hours
 - type: custom:haikubox-bird-card
   entity: sensor.bird_shazam_daily_top_species
   position: 1
@@ -54,35 +61,36 @@ By default the card shows the top-ranked bird. Set `position` (1-based) to show 
   position: 3
 ```
 
-If `position` exceeds the number of detections the sensor currently has, the card shows its empty state. `position` is also available as a field in the visual editor.
+If there aren't that many birds in the list, the card shows its empty message. `position` is also in the visual editor.
 
-### Per-event vs. per-species
+### `last_detection` is different
 
-Most sensors' `detections` lists are **per-species** — one record per distinct bird. The card pointed at any of these shows the species ranked #1 by that sensor's criterion (most recent, rarest, most detected, etc.).
+Most sensors list one record per species. `last_detection` lists individual detections, so a card pointed at it shows the single most recent detection. It keeps showing it through restarts and outages. See [sensors.md](sensors.md#one-record-per-species-or-per-detection) for details.
 
-`last_detection.detections` is the exception: it's **per-event** (one record per individual detection), read from a persisted rolling cache of the 50 most recent events. The card pointed at `last_detection` therefore shows the single most recent event and keeps showing it through restarts and outages (#62). See [sensors.md](sensors.md#per-species-vs-per-event-live-vs-cached) for details.
-
-`last_detection` no longer blanks on an outage — its rolling cache keeps the last detection regardless of age. The "box has gone silent" signal is instead **`notable_species` going `unknown`** (nothing notable in 24 h) or **`recent_detections` reading 0** — usually a hardware or connectivity problem worth investigating.
+Since `last_detection` never goes blank, it can't tell you the box has stopped working. For that, watch for `notable_species` going `unknown`, `recent_detections` staying at 0, or the [`extended_silence`](sensors.md#binary_sensorextended_silence) binary sensor.
 
 ### Tap action
 
-Supported actions: `more-info` (**default** — opens the bound sensor's dialog), `show-list` (opens a popup of the full species list for this sensor — see below), `navigate`, `url`, and `none` (card is inert).
+What happens when you tap the card:
 
-`navigation_path` and `url_path` accept four tokens, URL-encoded from the displayed record (the one selected by `position`) — so the action always targets the bird the user is looking at, on any sensor:
+- `more-info` (the default) opens the sensor's more-info dialog.
+- `show-list` opens a popup with the full list for the same sensor (see below).
+- `navigate` goes to another dashboard page.
+- `url` opens a web page.
+- `none` does nothing.
 
-| Token | Substituted with | Use case |
+`navigation_path` and `url_path` can include these tokens, which are filled in from the bird the card is showing:
+
+| Token | Replaced with | Example |
 |--|--|--|
-| `{species}` | Common name (e.g. `Downy Woodpecker`) | Generic search or dashboard navigation |
-| `{species_slug}` | Common name with spaces → underscores (e.g. `Downy_Woodpecker`) | URL formats like allaboutbirds.org that key on the slug |
-| `{sp_code}` | Four-letter species code (e.g. `dowwoo`) | eBird-style URL keys |
-| `{scientific_name}` | Latin binomial (e.g. `Picoides pubescens`) | Generic search by scientific name |
+| `{species}` | Common name | `Downy Woodpecker` |
+| `{species_slug}` | Common name with underscores for spaces | `Downy_Woodpecker` |
+| `{sp_code}` | eBird species code | `dowwoo` |
+| `{scientific_name}` | Scientific name | `Picoides pubescens` |
 
-Two of the Haikubox app's own external references map cleanly to these tokens:
+Open the bird's eBird page:
 
 ```yaml
-# Open the eBird species page for the bird currently displayed.
-# eBird URLs are keyed on the species code we already carry as
-# `sp_code` — one-to-one substitution, no encoding tricks needed.
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_last_detection
 tap_action:
@@ -90,12 +98,9 @@ tap_action:
   url_path: https://ebird.org/species/{sp_code}
 ```
 
+Open the bird's All About Birds page, which uses the underscore form of the name:
+
 ```yaml
-# Open the All About Birds species page for the bird currently
-# displayed. allaboutbirds.org keys URLs on the common name with
-# spaces converted to underscores ("Downy_Woodpecker") — that's
-# exactly what `{species_slug}` produces. Hyphenated names like
-# "White-winged Dove" keep their hyphens.
 type: custom:haikubox-bird-card
 entity: sensor.bird_shazam_last_detection
 tap_action:
@@ -103,7 +108,7 @@ tap_action:
   url_path: https://www.allaboutbirds.org/guide/{species_slug}
 ```
 
-Token substitution works for `navigate` actions too — e.g. jumping to a dashboard view anchored to the species name:
+Tokens work with `navigate` too:
 
 ```yaml
 type: custom:haikubox-bird-card
@@ -113,9 +118,9 @@ tap_action:
   navigation_path: /lovelace-birds/species#{species}
 ```
 
-#### `show-list` — popup the full species list
+#### `show-list`
 
-`action: show-list` opens a modal popup containing the [`haikubox-bird-list-card`](#haikubox-bird-list-card) for the **same sensor** — a quick way to go from a single-bird summary to the full ranked list without leaving the dashboard. The popup has a backdrop and closes on click-outside or **Esc**.
+`show-list` opens a popup with the [list card](#haikubox-bird-list-card) for the same sensor. Click outside the popup or press **Esc** to close it.
 
 ```yaml
 type: custom:haikubox-bird-card
@@ -124,35 +129,35 @@ tap_action:
   action: show-list
 ```
 
-The visual editor exposes a **Tap action** dropdown — More info / Show species list / Navigate / Open URL / None — and a path field for the navigate/url cases. (This is a Haikubox-specific picker rather than Home Assistant's standard action selector, because `show-list` is a custom action HA's selector can't list; raw `tap_action` YAML still works either way.)
+`show-list` isn't a standard Home Assistant action, so the card editor uses its own tap action dropdown instead of the usual one. Writing `tap_action` in YAML works the same either way.
 
 ---
 
 ## `haikubox-bird-list-card`
 
-A ranked species list with tap-to-expand detail rows. Works with **any** list-bearing sensor — they all expose the same [`detections` contract](sensors.md#the-detections-contract).
+A ranked list of birds. Tap a row to expand it. Works with any sensor that has a [`detections` list](sensors.md#the-detections-attribute).
 
 ```yaml
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_yearly_top_species
-title: Top Species (Last 12 Months)   # optional; blank or omitted → entity friendly name
-top: 10                        # max items to render (default: 10)
-row_size: small                # small | medium | large (default: small)
-show_ebird: false              # eBird links in compact view (default: false)
-show_allaboutbirds: false      # All About Birds links in compact view (default: false)
-show_macaulay: false           # Macaulay Library links in compact view (default: false)
-show_description: true         # Wikipedia description in the detail view (default: true)
-show_audio: true               # "Play call" button in the detail view (default: true)
+title: Top Species (Last 12 Months)   # optional; defaults to the sensor's name
+top: 10                        # how many birds to show (default 10)
+row_size: small                # small, medium or large (default small)
+show_ebird: false              # eBird button on each row (default false)
+show_allaboutbirds: false      # All About Birds button on each row (default false)
+show_macaulay: false           # Macaulay Library button on each row (default false)
+show_description: true         # Wikipedia description when a row is expanded (default true)
+show_audio: true               # play button when a row is expanded (default true)
 grid_options:
   columns: 12
-  rows: 4                      # controls card height; list scrolls if content exceeds it
+  rows: 4                      # card height; the list scrolls if it's longer
 ```
 
-Each row shows the species, its `#rank` (by that sensor's own measure — see the contract table), photo, and scientific name. **Tap a row** and it expands in place — the compact row is replaced by a detail view with a larger photo, the scientific name, a short Wikipedia description (tap it to open the full article), `count×` and a "last heard" timestamp where the sensor provides them, and reference links (see below). Tap again to collapse. Only one row is open at a time.
+Each row shows the bird's rank, photo, and common and scientific names. Tap a row to expand it into a larger photo, a short Wikipedia description, how many times it was heard, when it was last heard, and links to eBird, All About Birds and the Macaulay Library. Tap again to close it. Only one row is open at a time.
 
 ### Row size
 
-`row_size` scales the resting (compact) rows — `small` (default, the densest), `medium`, or `large` grow the thumbnail, padding, and text together. It's also a dropdown in the visual editor. Larger sizes trade list density for legibility at a distance; the expanded detail view is the same regardless.
+`row_size` makes the rows bigger or smaller: `small` (the default), `medium` or `large`. Larger rows are easier to read from a distance but fit fewer birds. The expanded view is the same size either way.
 
 ```yaml
 type: custom:haikubox-bird-list-card
@@ -161,40 +166,43 @@ title: Top species (today)
 row_size: large
 ```
 
-### Reference link buttons
+### Reference links
 
-Each row can link out to the bird's external species page on **eBird**, **All About Birds**, and the **Macaulay Library**. The integration surfaces the URLs (all templated from the species code / common name) and the card just renders them. Links open in a new tab and don't toggle the row when clicked. (**Wikipedia** isn't a button — it's reached by tapping the description blurb in the detail view; see below.)
+Expanded rows always show links to the bird's page on eBird, All About Birds and the Macaulay Library. Links open in a new tab.
 
-- **Expanded detail view — always shown.** Tap any row to expand it in place; all available reference links appear in the detail view. No configuration needed.
-- **Compact row — opt-in.** `show_ebird`, `show_allaboutbirds`, and `show_macaulay` (default `false`, also toggles in the visual editor) add the buttons directly to the always-visible compact row. Handy on a wide card; leave them off on a narrow card — they wrap below the name rather than crowding it, and the links are still one tap away in the detail view.
+If you'd like the buttons on every row without expanding it, turn on `show_ebird`, `show_allaboutbirds` and `show_macaulay`. That works well on a wide card. On a narrow card the buttons wrap under the name.
 
 ```yaml
 type: custom:haikubox-bird-list-card
 entity: sensor.bird_shazam_rarest_species
 title: Rarest species (7 d)
-show_ebird: true            # eBird button on the compact row too
-show_allaboutbirds: true    # All About Birds button on the compact row too
-show_macaulay: true         # Macaulay Library button on the compact row too
+show_ebird: true
+show_allaboutbirds: true
+show_macaulay: true
 ```
 
 ### Species description
 
-The detail view shows a short **Wikipedia** description, fetched on demand the first time you open a species' row (and cached for the session). Tap it — or the "Read more on Wikipedia ›" cue beneath it — to open the full article in a new tab. Turn it off with `show_description: false` (also a toggle in the visual editor); doing so also removes the only Wikipedia link from the card.
+An expanded row shows the first few lines of the bird's Wikipedia article. Tap the description to open the full article. Turn it off with `show_description: false`. That also removes the card's only link to Wikipedia.
 
 ### Play the call (audio)
 
-When a row has a cached recording, the detail view shows a **▶ Play call** button (and the bird card shows a round play button over the photo) that plays the detection's audio in the browser. Toggle the card element with `show_audio` (default on; both cards).
+When a recording is available, an expanded row shows a **▶ Play call** button, and the bird card shows a play button on the photo. Hide either with `show_audio: false`.
 
-**Audio is off by default** — it's downloading, normalizing and caching work, so you opt in: **Settings → Devices & Services → Haikubox → Configure → "Audio: enable 'play the call'"**. Once on, Haikubox's recording URLs (which expire after ~1 hour) are downloaded to `config/haikubox/audio/<serial>/` (namespaced per box) and served as stable local copies from the integration's own static path. The **headline** detections (last + notable) are always kept for 30 days; to also cache the full recent feed, raise **"Audio: extra days to cache the full feed"** (0 = headline only). Requires `ffmpeg` (bundled with Home Assistant).
+Audio is off by default because it downloads and processes recordings. Turn it on in **Settings → Devices & Services → Haikubox → Configure → Audio: enable 'play the call'**.
 
-Two things to know about which rows get a button:
+Once it's on:
 
-- Clips are **volume-normalized** (peak to −3 dB) when cached, because raw detection clips are often very quiet — without it, faint calls are inaudible.
-- A clip with **no real audio** (a near-silent recording) is treated as missing and shows **no button**, rather than a button that plays silence. So a play button appears only on recent/headline rows whose clip both exists and has audible content — not on every historical row.
+- Haikubox's links to recordings expire after about an hour, so the integration saves a copy of each clip under `config/haikubox/audio/<serial>/`.
+- Clips for the last detection and notable species are kept for 30 days. To keep clips for every detection, set **Audio: extra days to cache the full feed** to more than 0.
+- Detection clips are often very quiet, so each one is turned up (normalized) when it's saved.
+- A clip with no real sound in it gets no play button.
 
-> **No sound in Safari?** Safari's default per-site **Auto-Play: "Stop Media with Sound"** silences the cards' in-browser playback (the playhead moves but you hear nothing). Fix it at Safari → **Settings for This Website…** (or Settings → Websites → Auto-Play) → set your Home Assistant site to **Allow All Auto-Play**. Chrome, Firefox and the HA app are unaffected.
+This uses `ffmpeg`, which comes with Home Assistant.
 
-Point it at any list-bearing sensor:
+> **No sound in Safari?** Safari's default autoplay setting, "Stop Media with Sound", silences the cards. The progress bar moves but you won't hear anything. To fix it, go to **Safari → Settings for This Website…** and set Auto-Play to **Allow All Auto-Play** for your Home Assistant address. Chrome, Firefox and the Home Assistant app aren't affected.
+
+More examples:
 
 ```yaml
 # Top species (last 12 months)
@@ -222,14 +230,14 @@ grid_options:
   columns: 12
   rows: 4
 
-# Also valid: recent_detections, notable_species, new_species
+# recent_detections, notable_species and new_species work too
 ```
 
 ---
 
 ## Dashboard example
 
-A three-column details view using the sections layout:
+A three-column page using the sections layout:
 
 ```yaml
 type: sections
@@ -259,67 +267,63 @@ sections:
 
 ## Visual editor
 
-Both cards have a visual editor that the dashboard exposes automatically — there's no need to write YAML by hand. To use it: click **Add card** (or pencil-edit an existing one) → pick the Haikubox card type → the form on the right lets you set the entity and (for the list card) title and max items.
+You don't have to write YAML. Click **Add card**, pick a Haikubox card, and set the options in the editor.
 
-The entity picker is **pre-filtered to Haikubox sensors that expose a `detections` list** — so the 8 list-bearing sensors are offered, and the numeric/diagnostic ones (`daily_count`, `lifetime_species`, `species_diversity`, `activity_level`, `new_species_window`, `history_start`) are hidden. Unrelated integrations are filtered out entirely.
+The entity picker only lists Haikubox sensors that have a `detections` list. Sensors that are just a number, like `daily_count` or `activity_level`, aren't offered.
 
-The single-bird card's editor also includes a **Tap action** picker (more-info / navigate / url / none); URL/navigate paths can use `{species}`, `{species_slug}`, `{sp_code}`, and `{scientific_name}` tokens — see [Tap action](#tap-action) above for the full table and examples.
+The bird card's editor includes a tap action dropdown (More info, Show species list, Navigate, Open URL, None) with a path field for Navigate and Open URL. The tokens from [Tap action](#tap-action) work there too.
 
 ---
 
 ## Theming
 
-Both cards consume Home Assistant's standard CSS variables, so themes and `card_mod` work transparently. The variables they read:
+The cards use Home Assistant's standard theme variables, so themes and `card_mod` work as usual:
 
 | Variable | Used for |
 |--|--|
-| `--ha-card-border-radius` | Image and card corner radius |
+| `--ha-card-border-radius` | Card and photo corners |
 | `--primary-text-color` | Species name |
-| `--secondary-text-color` | Scientific name, timestamps, rank number |
-| `--secondary-background-color` | Image placeholder background, metric chips, thumbnail fallback |
-| `--divider-color` | Row separators in the list card; default scrollbar |
-| `--scrollbar-thumb-color` | List-card scrollbar (falls back to `--divider-color`) |
-| `--primary-color` | Focus outline on actionable elements |
-| `--disabled-text-color` | "No data yet" empty-state text |
+| `--secondary-text-color` | Scientific name, times, rank |
+| `--secondary-background-color` | Photo placeholder and small labels |
+| `--divider-color` | Lines between list rows, and the scrollbar |
+| `--scrollbar-thumb-color` | List scrollbar (falls back to `--divider-color`) |
+| `--primary-color` | Keyboard focus outline |
+| `--disabled-text-color` | "No data yet" message |
 
 ---
 
 ## Troubleshooting
 
-### "No recent detections" / blank card
+### "No recent detections" or a blank card
 
-The card renders `detections[0]` from its bound entity's `detections` attribute. If the list is empty, the card shows the empty state honestly rather than substituting a stale value.
+The card shows the first bird in its sensor's `detections` list. If the list is empty, the card says so instead of showing an old bird.
 
-Common causes by sensor:
+Why a list might be empty:
 
-- **`last_detection`** — only blank before the box's very first detection; its rolling cache persists through restarts/outages, so a blank here on an established box is unexpected (check HA logs).
-- **`notable_species`** — observation window; `unknown`/blank when nothing is detected in 24 h (e.g. box offline). This is the intended "box has gone silent" signal.
-- **`daily_top_species`** — today's `/daily-count`; blank only before the first detection of the local day (or if that fetch is failing — check HA logs).
-- **`recent_detections`** — quiet hour. Normal during a sleeping-bird stretch.
-- **`new_species`** — would only be empty if `_seen_species` has never been populated (truly fresh install with API down on first poll). Look at HA logs.
+- **`last_detection`**: only before the box's first ever detection. If it's empty on a box that's been running a while, check the Home Assistant logs.
+- **`notable_species`**: nothing heard in 24 hours. Your box may be offline.
+- **`daily_top_species`**: nothing heard yet today.
+- **`recent_detections`**: nothing heard in the last hour. Normal at night.
+- **`new_species`**: only on a brand-new install if Haikubox couldn't be reached on the first poll. Check the logs.
 
-(`daily_count` is a numeric total, not a list, so the cards don't accept it and the editor picker hides it.)
+To see exactly what the card sees, go to **Developer Tools → States**, find the sensor, and look at its `detections` attribute.
 
-To inspect: **Developer Tools → States** → search for the entity → the `detections` attribute is the list the card reads.
+### Photos show 🐦 instead of the bird
 
-### Images aren't loading
+The 🐦 placeholder means the photo didn't load. Photos are saved in `/config/haikubox/`. If that folder was deleted, it fills back up as the box hears each species again. If there's no saved copy, the card loads the photo from Haikubox's servers instead, so you'll only see 🐦 when both fail.
 
-Each card replaces a broken image with the 🐦 placeholder automatically, so if you're seeing the placeholder it means the image URL didn't load.
+### "Custom element doesn't exist" after a restart
 
-- Check `/config/haikubox/` exists and contains JPEGs. If the folder was deleted, the cache will rebuild on subsequent polls as species are detected (any active species cycles through the cache within ~10 minutes).
-- The cards display the **cached** local URL when available, falling back to the remote S3 URL otherwise — so the 🐦 placeholder only appears when both fail.
+See [troubleshooting.md](troubleshooting.md#cards-show-custom-element-doesnt-exist-after-a-restart).
 
-### "Configure" button missing for an integration option (e.g. notability slider)
+### The Configure button is missing
 
-That's the integration's options flow, not a card setting. It lives at **Settings → Devices & Services → Haikubox tile → Configure** — separate from the cards' editor. If the button isn't there, reload the integration (kebab menu → Reload) or restart HA so the new options flow registers.
+Settings like the notability slider are in the integration's options, not the card editor: **Settings → Devices & Services → Haikubox → Configure**. If the button isn't there, reload the integration (**⋮ → Reload**) or restart Home Assistant.
 
-### Card hasn't picked up the latest version after upgrade
+### The card didn't update after an upgrade
 
-Card JS is browser-cached. The integration appends a `?v=<version>` query bust on upgrade, but if you're still seeing old behaviour:
+Browsers cache the card code. The integration changes the card's URL on every release to get around this, but if the card still looks old, force a refresh (Cmd/Ctrl + Shift + R) in each browser and app you use.
 
-- Hard refresh the dashboard tab (Cmd/Ctrl + Shift + R).
-- If running multiple HA dashboards / mobile apps, refresh each.
+### The editor's entity picker is empty
 
-### Editor entity picker is empty
-
-The picker is filtered to entities created by the Haikubox integration. If no entities show up, the integration probably hasn't loaded or set up an entry yet — go to **Settings → Devices & Services** and confirm the Haikubox tile is healthy.
+The picker only shows Haikubox sensors. If it's empty, check **Settings → Devices & Services** to make sure the Haikubox integration loaded.
