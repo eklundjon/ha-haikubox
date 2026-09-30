@@ -39,6 +39,14 @@ The real coordinator `__init__` sets up an aiohttp session, six `Store` objects,
 
 `tests/test_api.py` tests `HaikuboxApiClient` directly with a small fake session, rather than mocking aiohttp inside the coordinator. That's one of the reasons the network code has its own module.
 
+### Card JavaScript tests
+
+`tests/js/` tests the card loader and the card modules' guards against being loaded twice. They use Node's built-in test runner (Node 22 or newer) and have no dependencies, so there's nothing to install:
+
+```bash
+node --test "tests/js/*.test.mjs"
+```
+
 ## Linting
 
 The linter is `ruff`, and its version is pinned in `requirements_test.txt`. CI reads the version from that file, so the pin only lives in one place:
@@ -51,9 +59,10 @@ The rules are set in `pyproject.toml`: pyflakes, pycodestyle, isort, bugbear, co
 
 ## What CI checks
 
-`.github/workflows/test.yml` runs on every push to `main` and every pull request. It has two jobs:
+`.github/workflows/test.yml` runs on every push to `main` and every pull request. It has three jobs:
 
 - **ruff**: `ruff check .` on Python 3.13 with the pinned ruff.
+- **card JS**: the tests in `tests/js/` on Node 24.
 - **pytest**: runs the tests against two Home Assistant versions, the minimum and the latest, by pinning PHACC:
 
   | Job | PHACC | Home Assistant |

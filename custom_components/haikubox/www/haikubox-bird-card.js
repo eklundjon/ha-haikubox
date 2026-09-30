@@ -976,10 +976,15 @@ class HaikuboxBirdCard extends HTMLElement {
 if (!customElements.get("haikubox-bird-card")) {
   customElements.define("haikubox-bird-card", HaikuboxBirdCard);
 
+  // The define guard alone doesn't cover this: when HA's scoped-registry
+  // polyfill hides a native define, the loader runs this module a second time
+  // (see haikubox-card-loader.js), and the card picker would list it twice.
   window.customCards ??= [];
-  window.customCards.push({
-    type: "haikubox-bird-card",
-    name: "Haikubox Bird Card",
-    description: "Displays a Haikubox bird detection with photo, species name, and timestamp.",
-  });
+  if (!window.customCards.some((c) => c.type === "haikubox-bird-card")) {
+    window.customCards.push({
+      type: "haikubox-bird-card",
+      name: "Haikubox Bird Card",
+      description: "Displays a Haikubox bird detection with photo, species name, and timestamp.",
+    });
+  }
 }
