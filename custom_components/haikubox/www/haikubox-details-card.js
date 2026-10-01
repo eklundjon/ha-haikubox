@@ -1062,10 +1062,15 @@ class HaikuboxBirdListCard extends HTMLElement {
 if (!customElements.get("haikubox-bird-list-card")) {
   customElements.define("haikubox-bird-list-card", HaikuboxBirdListCard);
 
+  // The define guard alone doesn't cover this: when HA's scoped-registry
+  // polyfill hides a native define, the loader runs this module a second time
+  // (see haikubox-card-loader.js), and the card picker would list it twice.
   window.customCards ??= [];
-  window.customCards.push({
-    type: "haikubox-bird-list-card",
-    name: "Haikubox Bird List Card",
-    description: "Ranked bird species list — works with yearly, daily, or 7-day rarity sensors.",
-  });
+  if (!window.customCards.some((c) => c.type === "haikubox-bird-list-card")) {
+    window.customCards.push({
+      type: "haikubox-bird-list-card",
+      name: "Haikubox Bird List Card",
+      description: "Ranked bird species list — works with yearly, daily, or 7-day rarity sensors.",
+    });
+  }
 }

@@ -17,8 +17,19 @@
 //
 // The integration version rides in on this file's ?v= query (the resource URL)
 // and is forwarded to the card URLs, so they match the add_extra_js_url URLs
-// exactly — the browser's module map then runs each card module only once no
-// matter which path loads it first.
+// exactly — the browser's module map then normally runs each card module only
+// once no matter which path loads it first.
+//
+// The one exception is browsers without native scoped custom element
+// registries (e.g. WebKit before iPadOS/Safari 26), where HA's app bundle
+// installs a polyfill that replaces window.customElements. index.html starts
+// the app bundle and the add_extra_js_url modules in parallel; if a card
+// module wins, it defines its element on the native registry, which the
+// polyfill's get()/whenDefined() can't see — so Lovelace never finds the card,
+// on every reload. Importing the same URL again is a no-op (the module has
+// already run), so a resolved import only counts once the tag is visible on
+// the current registry; otherwise the retry path re-runs the module under a
+// fresh URL, which defines it on the polyfilled registry.
 
 // Keep in sync with _CARDS in __init__.py: [custom element tag, module URL].
 const CARDS = [
@@ -36,8 +47,14 @@ const FIRST_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 30_000;
 const GIVE_UP_MS = 10 * 60_000;
 
-async function load(tag, path) {
-  const started = Date.now();
+// The options are seams for tests/js/card_loader.test.mjs; the page calls
+// load(tag, path).
+export async function load(tag, path, {
+  importModule = (url) => import(url),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = Date.now,
+} = {}) {
+  const started = now();
   let delay = FIRST_DELAY_MS;
   for (let attempt = 0; ; attempt++) {
     // Already defined (add_extra_js_url got there first, or an earlier try).
@@ -45,22 +62,31 @@ async function load(tag, path) {
     // The first try uses the exact add_extra_js_url URL. Retries add a unique
     // param: a failed fetch may be remembered by the module map or the HTTP
     // cache (404s are heuristically cacheable), so the same URL could keep
-    // failing even after the path is registered. A card module that ends up
-    // loaded under two URLs is harmless — its customElements.define is guarded.
+    // failing even after the path is registered. It also forces the module to
+    // run again in the polyfill case above. A card module that ends up loaded
+    // under two URLs is harmless — its define and customCards entry are guarded.
     const url = `${path}?v=${encodeURIComponent(version)}` +
       (attempt ? `&retry=${attempt}` : "");
+    let error;
     try {
-      await import(url);
-      return;
+      await importModule(url);
+      // Resolving only means the module has run at some point, not that the
+      // current registry can see the element (see the polyfill note above).
+      if (customElements.get(tag)) return;
     } catch (err) {
-      if (Date.now() - started > GIVE_UP_MS) {
-        console.warn(`Haikubox: giving up loading ${path}`, err);
-        return;
-      }
+      error = err;
     }
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (now() - started > GIVE_UP_MS) {
+      console.warn(`Haikubox: giving up loading ${path}`, error ?? `${tag} was never defined`);
+      return;
+    }
+    await sleep(delay);
     delay = Math.min(delay * 2, MAX_DELAY_MS);
   }
 }
 
-for (const [tag, path] of CARDS) load(tag, path);
+// Only in a page: the tests import this file under Node, which has no
+// custom element registry.
+if (typeof customElements !== "undefined") {
+  for (const [tag, path] of CARDS) load(tag, path);
+}

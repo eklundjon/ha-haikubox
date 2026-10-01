@@ -15,6 +15,13 @@ from the first request:
     so is listed for the page even during startup.
 The loader then retries the real card imports until our static path is up.
 
+It also covers a second failure that looks the same in the browser: where HA
+installs its scoped custom element registry polyfill (older WebKit), a card
+module that ran before the polyfill defined its element on the native
+registry, which the polyfill can't see. The loader only counts a card as
+loaded once the current registry has it, and otherwise re-runs the module
+under a fresh URL. See the header of www/haikubox-card-loader.js.
+
 Resources only exist in storage mode; YAML-mode dashboards still get the cards
 via add_extra_js_url but must list the loader themselves to cover startup.
 """
