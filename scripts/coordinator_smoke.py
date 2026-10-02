@@ -13,8 +13,9 @@ from the summary; notability is forced to pure-rarity (recency-independent).
 import asyncio
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-sys.path.insert(0, ".")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from custom_components.haikubox.const import CONF_NOTABLE_RARITY_WEIGHT  # noqa: E402
 from custom_components.haikubox.coordinator import HaikuboxCoordinator  # noqa: E402
 
