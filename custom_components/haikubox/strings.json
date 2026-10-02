@@ -70,7 +70,7 @@
               "audio_norm_target": "Normalization target (peak)"
             },
             "data_description": {
-              "audio_enabled": "Master switch for “play the call”. Off by default. When on, recent detection recordings are downloaded to config/www, normalized so faint calls are audible, and served locally so the cards show a play button (the source URLs expire in ~1 hour). Off means no downloads, no processing and no buttons. Needs ffmpeg (bundled with Home Assistant).",
+              "audio_enabled": "Master switch for “play the call”. Off by default. When on, recent detection recordings are downloaded to config/haikubox, normalized so faint calls are audible, and served locally so the cards show a play button (the source URLs expire in ~1 hour). Off means no downloads, no processing and no buttons. Needs ffmpeg (bundled with Home Assistant).",
               "audio_cache_days": "The headline detections (last + notable) are always cached for 30 days. This caches the full recent feed for this many extra days too (heavier download). 0 = headline clips only. Roughly 74 KB/clip; the cache is hard-capped regardless.",
               "audio_norm_target": "Detection clips are often very quiet, so each is volume-normalized to this peak level (dBFS) when cached. Default -3 dB. Lower it if playback is too hot for your speakers; 0 dB is loudest but leaves no headroom and can clip on some outputs (-1 to -3 is safer)."
             }

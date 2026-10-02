@@ -6,6 +6,12 @@
 
 This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com/) bird detector. It shows what your box has been hearing, keeps daily and yearly species counts, points out unusual visitors, and comes with two dashboard cards that show bird photos.
 
+**Before you start:**
+
+- **Turn on sharing for your Haikubox.** The integration reads the public Haikubox API, which can't see a box that isn't shared, and sharing is off by default. It takes a minute at listen.haikubox.com, and that's also where you get the serial number setup asks for. See [Turn on sharing](#turn-on-sharing).
+- **Home Assistant 2025.4 or later.**
+- If your Haikubox hears bats as well as birds, tick **Bat support** during setup.
+
 ## Features
 
 - **Recent detections.** Species heard in the last hour, updated every 10 minutes.
@@ -90,7 +96,7 @@ entities:
 | The two cards, YAML examples, tap actions, a sample dashboard | [docs/cards.md](docs/cards.md) |
 | Device triggers, the `haikubox_event` event, notification blueprints | [docs/automations.md](docs/automations.md) |
 | Bat support: what it adds, and how bats are kept out of bird counts | [docs/bats.md](docs/bats.md) |
-| Advanced options (windows and polling), changing the serial number or bat support | [docs/advanced.md](docs/advanced.md) |
+| Every option and its default, polling on your own schedule, changing the serial number or bat support | [docs/advanced.md](docs/advanced.md) |
 | Setup problems, cards not loading, sensors that look empty, upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Which Haikubox API calls the integration makes and when | [docs/api.md](docs/api.md) |
 | How the code is organized | [docs/architecture.md](docs/architecture.md) |

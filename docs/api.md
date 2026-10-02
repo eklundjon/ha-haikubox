@@ -163,6 +163,7 @@ The poll interval and recent window are in the options flow's **Advanced** secti
 | Failure | What happens |
 |---|---|
 | `/detections` raises `aiohttp.ClientError` | `_async_update_data` raises `UpdateFailed`, and sensors are unavailable until the next good poll |
+| `/detections` fails with a `Retry-After` header (usually a `429`) | Same, and on Home Assistant 2025.12 and later the next poll waits as long as the header asks, capped at an hour. A delay shorter than the poll interval is ignored, since Home Assistant would otherwise poll sooner than usual. |
 | `/daily-count` returns `404` | No data for that day, or the box didn't exist yet. Not an error. |
 | `/daily-count` returns `429` or 5xx during history download | Download stops until the next poll, progress is saved, the 404 count isn't advanced |
 | `/daily-count` connection error during history download, with saved history | Warning logged, baseline rebuilt from saved history, download retried next poll |

@@ -1,8 +1,36 @@
-# Advanced configuration
+# Options
 
-## Windows and polling
+Every option is under **Settings → Devices & Services → Haikubox → Configure**, in the sections below, in the order the form shows them. The defaults work for most boxes. Saving reloads the integration, so new values take effect right away.
 
-The defaults work for most boxes, but you can change them under **Settings → Devices & Services → Haikubox → Configure → Advanced**. Saving reloads the integration, so new values take effect right away.
+Serial number and bat support aren't options. They're set with **Reconfigure** (see [the last section](#changing-the-serial-number-or-bat-support)).
+
+## Main options
+
+| Option | Default | Range | What it does |
+| --- | --- | --- | --- |
+| **Notability: % weight toward rarity** | 70% | 0–100% | How `notable_species` balances rarity against recency. 100% ranks on rarity alone, 0% on how recently each bird was heard. See [sensors.md](sensors.md) for the scoring. |
+| **Unusual visitor: days unheard** | 30 days | 1–365 days | How long a species the box knows has to go unheard before it counts as an unusual visitor when it comes back. This drives the `unusual_visitor` trigger. |
+
+## Watched species
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| **Watch species (detected here)** | none | Species to get a "watched species detected" trigger for, picked from what your box has heard. |
+| **Also watch (one name per line)** | empty | Species your box hasn't heard yet, such as a bird you're hoping for. Use the common name exactly as the Haikubox app spells it. |
+
+See [automations.md](automations.md) for the triggers.
+
+## Audio
+
+"Play the call" is off by default. When it's on, the integration downloads recent detection recordings to `config/haikubox/audio/`, turns up the quiet ones, and serves them locally, so the cards get a play button. (Haikubox's own clip links expire after about an hour, which is why they're copied.) It needs ffmpeg, which comes with Home Assistant.
+
+| Option | Default | Range | What it does |
+| --- | --- | --- | --- |
+| **Enable "play the call"** | off | | The master switch. Off means no downloads, no processing and no play buttons. |
+| **Extra days to cache the full feed** | 0 days | 0–90 days | Clips for the last and notable detections are always kept for 30 days. This keeps every recent clip for this many days as well. That's a heavier download, at roughly 74 KB a clip, and the cache has a hard size cap either way. |
+| **Normalization target (peak)** | -3 dB | -24 to 0 dB | The peak level each clip is turned up (or down) to. Lower it if playback is too loud on your speakers. 0 dB is loudest but leaves no headroom and can clip on some outputs. |
+
+## Advanced
 
 | Option | Default | Range | What it does |
 | --- | --- | --- | --- |
