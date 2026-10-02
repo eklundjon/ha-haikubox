@@ -137,12 +137,16 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_serial"
                 else:
                     device_name = device.get("haikuboxName") or f"Haikubox {serial}"
-                    # The entry's update listener does the reload; reloading
-                    # here too is deprecated from 2026.6 and an error in 2026.12.
-                    return self.async_update_and_abort(
-                        self._get_reconfigure_entry(),
+                    # Update only: the entry's update listener does the reload,
+                    # and reloading here too is deprecated from 2026.6 and an
+                    # error in 2026.12. This is async_update_and_abort, which
+                    # ConfigFlow lacks on our 2025.4 minimum.
+                    entry = self._get_reconfigure_entry()
+                    self.hass.config_entries.async_update_entry(
+                        entry,
                         title=device_name,
-                        data_updates={
+                        data={
+                            **entry.data,
                             CONF_SERIAL: serial,
                             CONF_DEVICE_NAME: device_name,
                             CONF_BAT_SUPPORT: user_input.get(
@@ -150,6 +154,7 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
                             ),
                         },
                     )
+                    return self.async_abort(reason="reconfigure_successful")
 
         entry = self._get_reconfigure_entry()
         return self.async_show_form(
