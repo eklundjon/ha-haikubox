@@ -19,7 +19,7 @@ With bat support on, four sensors are added:
 |---|---|---|
 | `sensor.last_bird_detection` | the most recent bird | that detection |
 | `sensor.last_bat_detection` | the most recent bat | that detection |
-| `sensor.bat_detections_today` | bat detections so far today | none |
+| `sensor.bat_count_today` | bat detections so far today | none |
 | `sensor.bats_today` | bat species heard today | today's bats, by count |
 
 "Today" is the box's local calendar day, the same as for **Detections today**, and the counts are the true daily counts. A night of bats is split at midnight, just as a day of birds is.
