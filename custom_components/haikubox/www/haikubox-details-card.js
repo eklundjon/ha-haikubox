@@ -1070,7 +1070,7 @@ if (!customElements.get("haikubox-bird-list-card")) {
     window.customCards.push({
       type: "haikubox-bird-list-card",
       name: "Haikubox Bird List Card",
-      description: "Ranked bird species list — works with yearly, daily, or 7-day rarity sensors.",
+      description: "Ranked list of birds or bats — works with the top, rarest, recent and bats-today sensors.",
     });
   }
 }

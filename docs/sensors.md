@@ -21,6 +21,8 @@ Each Haikubox gets one device in Home Assistant, and all of its entities live un
 | `sensor.history_start` | Diagnostic. The earliest day of history the integration has downloaded. | `days_recorded`, `days_span`, `backfill_complete` |
 | `sensor.watched_species` | How many of your watched species the box has heard | `detections`, your watched species, most recently heard first |
 
+With bat support on, four bat sensors are added, and `sensor.last_detection` can be a bat. Bird sensors never count bats. See [bats.md](bats.md).
+
 ### `sensor.lifetime_species`
 
 Your box's life list: every different species it has ever heard. The number only goes up. It's recorded in Home Assistant's long-term statistics, so a history graph shows it climbing over the months. The same number is on `new_species` as the `lifetime_species_count` attribute.

@@ -36,7 +36,7 @@ graph TB
     subgraph External
         API["api.haikubox.com"]
         S3["haikubox-images S3"]
-        HAStore["HA .storage/<br/>6 JSON files"]
+        HAStore["HA .storage/<br/>7 JSON files"]
         WWW["config/haikubox/<br/>cached photos + audio"]
     end
 
@@ -68,23 +68,24 @@ custom_components/haikubox/
 ├── __init__.py           # setup and teardown, migrations, cache static path, card registration
 ├── api.py                # HaikuboxApiClient (all HTTP) and the setup-time device check
 ├── audio_cache.py        # AudioCache: download, normalize and prune detection clips
+├── bats.py               # telling bats from birds: codes, names, splitting feeds and counts
 ├── binary_sensor.py      # extended-silence binary sensor
 ├── card_loader.py        # copies the card loader to config/www and registers it as a resource
 ├── config_flow.py        # config flow (setup and reconfigure) and options flow
 ├── const.py              # domain, config keys, tuning constants, event and trigger names
 ├── coordinator.py        # HaikuboxCoordinator: runs each poll
-├── device_trigger.py     # new_species / unusual_visitor / watched_species triggers
+├── device_trigger.py     # new_species / unusual_visitor / watched_species / bat_activity triggers
 ├── diagnostics.py        # redacted state dump
 ├── entity.py             # HaikuboxEntity: shared device info for the platforms
 ├── image_cache.py        # ImageCache: download each species photo once, serve it locally
 ├── manifest.json         # the version here is the release version
 ├── normalize.py          # response parsing, rarity and notability scoring, link URLs
-├── sensor.py             # 14 sensor classes
+├── sensor.py             # 14 sensor classes, plus 4 with bat support on
 ├── statistics.py         # long-term statistics backfill
 ├── strings.json          # translation keys and display names
 ├── translations/
 │   └── en.json
-├── data/                 # eBird common name → code / scientific name map, plus NOTICE
+├── data/                 # eBird common name → code / scientific name map, USGS bat list, NOTICE
 ├── brand/                # logo and icon (also in home-assistant/brands)
 └── www/
     ├── haikubox-bird-card.js     # single-bird card
@@ -182,6 +183,7 @@ Local variables in `_async_update_data`: `detections` (last hour, newest first),
 | `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_async_setup` |
 | `_daily_counts: dict[str, dict[str, int]]` for the life of the box. `_baseline_ranks`, `_baseline_species_count` and `_baseline_items` are rebuilt from it. | `haikubox.<serial>.daily_counts` | `_async_setup`, which also rebuilds the baseline |
 | `_event_buffer: list[dict]`, the last 50 detections behind `last_detection` | `haikubox.<serial>.recent_events` | `_async_setup` |
+| `_last_by_class: dict`, the newest bird and newest bat detection, kept apart from the event list so a night of bats can't push out the last bird | `haikubox.<serial>.last_by_class` | `_async_setup` |
 
 Each file is only written when its data changes, tracked with a dirty flag. The event list, for example, is only written when a poll adds a new detection.
 

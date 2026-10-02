@@ -19,6 +19,7 @@ This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com
 - **Play the call.** A play button on the cards plays the detection's recording in your browser. This is off by default. Turn it on in the integration's options.
 - **Automations.** Device triggers for new species, unusual visitors and species you're watching for, plus four blueprints for photo notifications and playing a call on a speaker ([one-click import](docs/automations.md#importing-a-blueprint)).
 - **Watched species.** Pick birds you want to hear about and get a trigger when one shows up.
+- **Bats.** On a bird-and-bat Haikubox, turn on bat support for bat sensors, a bat list card and a "bat activity" trigger. Bird counts never include bats ([details](docs/bats.md)).
 - Bird photos are cached locally, so cards keep working if the Haikubox servers are down.
 
 ## Quick start
@@ -88,6 +89,7 @@ entities:
 | Every sensor, the `detections` attribute, how rarity is scored, what's saved between restarts | [docs/sensors.md](docs/sensors.md) |
 | The two cards, YAML examples, tap actions, a sample dashboard | [docs/cards.md](docs/cards.md) |
 | Device triggers, the `haikubox_event` event, notification blueprints | [docs/automations.md](docs/automations.md) |
+| Bat support: what it adds, and how bats are kept out of bird counts | [docs/bats.md](docs/bats.md) |
 | Advanced options (windows and polling), changing the serial number | [docs/advanced.md](docs/advanced.md) |
 | Setup problems, cards not loading, sensors that look empty, upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Which Haikubox API calls the integration makes and when | [docs/api.md](docs/api.md) |

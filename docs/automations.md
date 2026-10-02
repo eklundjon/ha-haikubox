@@ -10,6 +10,7 @@ Every Haikubox device has these triggers under **Settings → Automations → Cr
 | --- | --- |
 | **New species detected** | The box hears a species for the first time ever. |
 | **Unusual visitor detected** | A species the box already knows comes back after a long absence (30 days by default; see [below](#tuning-the-unusual-visitor-threshold)). |
+| **Bat activity started** | Only with [bat support](bats.md) on: bats are heard after at least 60 minutes without one. |
 | **Watched species detected** | The box hears one of the species you're watching for. Choose them in **Settings → Devices & Services → Haikubox → Configure**. You can pick from birds your box has heard, or type in ones it hasn't heard yet. |
 
 Pick your box and a trigger, then add whatever actions you want. The detection's details are available to your actions (see the [event reference](#event-reference)).
@@ -55,11 +56,12 @@ Then go to **Settings → Automations & scenes → Create automation → Use blu
 
 ## Event reference
 
-All three triggers use one event, `haikubox_event`, and its `type` field says which kind it is. You can trigger on the event directly (**When → Other → Manual event**, event type `haikubox_event`) if you want one automation for several boxes or want to filter on the fields yourself.
+All the triggers use one event, `haikubox_event`, and its `type` field says which kind it is. You can trigger on the event directly (**When → Other → Manual event**, event type `haikubox_event`) if you want one automation for several boxes or want to filter on the fields yourself.
 
 | Field | Description |
 | --- | --- |
-| `type` | `new_species`, `unusual_visitor` or `watched_species` |
+| `type` | `new_species`, `unusual_visitor`, `watched_species` or `bat_activity` |
+| `classification` | `bird` or `bat`. Bats only appear with [bat support](bats.md) on. |
 | `device_id` | The Haikubox's Home Assistant device ID |
 | `serial` | The Haikubox serial |
 | `device_name` | The box's name |
@@ -69,7 +71,7 @@ All three triggers use one event, `haikubox_event`, and its `type` field says wh
 | `image_url` | Photo URL (may be missing) |
 | `audio_url` | Local URL of the saved recording, or `null` if audio is off or there's no clip. Only works from inside your home network. |
 | `last_seen` | When the bird was heard |
-| `count` | How many times it was heard in the last hour |
+| `count` | How many times it was heard in the last hour. For `bat_activity`, the bat detections since the previous one. |
 | `ebird_url` | eBird page |
 | `wikipedia_url` | Wikipedia article |
 | `allaboutbirds_url` | All About Birds page |
@@ -77,7 +79,8 @@ All three triggers use one event, `haikubox_event`, and its `type` field says wh
 | `rarity_score` | How rare the bird is at your box over the last 12 months |
 | `yearly_rank` | Where the bird ranks in the last 12 months (1 is the most common) |
 | `days_absent` | `unusual_visitor` only: days since the bird was last heard |
-| `lifetime_species_count` | `new_species` only: how many species your box has ever heard, including this one |
+| `lifetime_species_count` | `new_species` only: how many species your box has ever heard, including this one. For a bat, how many bat species. |
+| `quiet_minutes` | `bat_activity` only: minutes since the previous bat |
 
 In a template, use `trigger.event.data.<field>`, for example `{{ trigger.event.data.species }}`.
 

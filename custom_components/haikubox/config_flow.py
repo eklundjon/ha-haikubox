@@ -30,6 +30,7 @@ from .const import (
     CONF_AUDIO_CACHE_DAYS,
     CONF_AUDIO_ENABLED,
     CONF_AUDIO_NORM_TARGET,
+    CONF_BAT_SUPPORT,
     CONF_DEVICE_NAME,
     CONF_NEW_SPECIES_WINDOW_DAYS,
     CONF_NOTABLE_RARITY_WEIGHT,
@@ -43,6 +44,7 @@ from .const import (
     DEFAULT_AUDIO_CACHE_DAYS,
     DEFAULT_AUDIO_ENABLED,
     DEFAULT_AUDIO_NORM_TARGET,
+    DEFAULT_BAT_SUPPORT,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -51,9 +53,12 @@ from .const import (
     RECENT_WINDOW_HOURS,
 )
 
+# Bat support lives in the entry's data (not the options) because it decides
+# which entities exist; reconfigure changes it and reloads the entry.
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SERIAL): str,
+        vol.Optional(CONF_BAT_SUPPORT, default=DEFAULT_BAT_SUPPORT): BooleanSelector(),
     }
 )
 
@@ -96,7 +101,13 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
                     device_name = device.get("haikuboxName") or f"Haikubox {serial}"
                     return self.async_create_entry(
                         title=device_name,
-                        data={CONF_SERIAL: serial, CONF_DEVICE_NAME: device_name},
+                        data={
+                            CONF_SERIAL: serial,
+                            CONF_DEVICE_NAME: device_name,
+                            CONF_BAT_SUPPORT: user_input.get(
+                                CONF_BAT_SUPPORT, DEFAULT_BAT_SUPPORT
+                            ),
+                        },
                     )
 
         return self.async_show_form(
@@ -129,12 +140,25 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_update_reload_and_abort(
                         self._get_reconfigure_entry(),
                         title=device_name,
-                        data_updates={CONF_SERIAL: serial, CONF_DEVICE_NAME: device_name},
+                        data_updates={
+                            CONF_SERIAL: serial,
+                            CONF_DEVICE_NAME: device_name,
+                            CONF_BAT_SUPPORT: user_input.get(
+                                CONF_BAT_SUPPORT, DEFAULT_BAT_SUPPORT
+                            ),
+                        },
                     )
 
+        entry = self._get_reconfigure_entry()
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_DATA_SCHEMA,
+                {
+                    CONF_SERIAL: entry.data.get(CONF_SERIAL),
+                    CONF_BAT_SUPPORT: entry.data.get(CONF_BAT_SUPPORT, DEFAULT_BAT_SUPPORT),
+                },
+            ),
             errors=errors,
             # Same placeholder — the reconfigure step doesn't show the
             # prerequisite in its own description, but a cannot_connect
