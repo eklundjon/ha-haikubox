@@ -99,3 +99,24 @@ async def test_no_change_when_history_already_complete(hass: HomeAssistant) -> N
 
     assert changed is False
     assert calls == []
+
+
+async def test_save_hands_the_store_a_snapshot(hass: HomeAssistant) -> None:
+    """The daily-count store serializes on a worker thread, so it gets a copy of
+    the history, not the live dict the next poll keeps adding days to."""
+    saved: list = []
+
+    class RecordingStore:
+        async def async_save(self, data) -> None:
+            saved.append(data)
+
+    c = make_coordinator(hass)
+    c._daily_store = RecordingStore()
+    c._fetch_daily_count = _counter({}, [])
+
+    await c._ensure_daily_counts(TODAY)
+
+    assert saved
+    days = saved[-1]["days"]
+    assert days == c._daily_counts
+    assert days is not c._daily_counts
