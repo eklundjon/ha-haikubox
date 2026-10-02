@@ -110,6 +110,15 @@ def _update_failed(message: str, retry_after: float | None) -> UpdateFailed:
     return UpdateFailed(message)
 
 
+# Store(serialize_in_event_loop=False) serializes on a worker thread (Home
+# Assistant 2025.12+). Older versions don't accept the argument, so check once.
+_STORE_OFF_LOOP_KWARGS = (
+    {"serialize_in_event_loop": False}
+    if "serialize_in_event_loop" in inspect.signature(Store.__init__).parameters
+    else {}
+)
+
+
 def async_get_entry_device(
     hass: HomeAssistant, identifier: tuple[str, str], entry_id: str
 ) -> dr.DeviceEntry | None:
@@ -273,7 +282,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sp_codes_store   = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sp_codes")
         self._sci_names_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.sci_names")
         self._last_seen_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_seen")
-        self._daily_store      = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.daily_counts")
+        # Every day of the box's life by species, by far the largest store, so
+        # it's serialized off the event loop where Home Assistant supports that.
+        self._daily_store      = Store(
+            hass, _STORE_VERSION, f"{DOMAIN}.{serial}.daily_counts", **_STORE_OFF_LOOP_KWARGS
+        )
         self._events_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.recent_events")
         self._by_class_store   = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_by_class")
 
@@ -1212,9 +1225,12 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         finally:
             if changed:
+                # The store serializes on a worker thread while the loop runs
+                # on, so hand it a snapshot. A shallow copy is enough: days are
+                # only ever replaced, never edited in place.
                 await self._daily_store.async_save(
                     {
-                        "days": self._daily_counts,
+                        "days": dict(self._daily_counts),
                         "backfill_complete": self._backfill_complete,
                         "cursor": self._backfill_cursor,
                         "misses": self._backfill_misses,
