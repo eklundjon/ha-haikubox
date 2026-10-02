@@ -1066,6 +1066,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # list, so load it (off the event loop) before the bird-only view and
         # the baseline are built from that history.
         await async_load_bat_names(self.hass)
+        if CONF_BAT_SUPPORT not in self.config_entry.data:
+            self._decide_bat_support()
 
         # Rebuild the rarity baseline from the persisted daily counts so
         # rarity is available immediately on restart, before the first poll's
@@ -1210,6 +1212,31 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._seen_species[sp] = day
                     changed = True
         return changed
+
+    def _decide_bat_support(self) -> None:
+        """One-time choice for an entry set up before bat support existed.
+
+        Such a box has been counting any bats it hears as birds, so turn bat
+        support on if its history or first-seen log holds a bat, and save the
+        answer either way so this never runs again (or overrides a later
+        choice made in reconfigure). Runs during the first refresh, before the
+        platforms set up and before the update listener is attached, so the
+        bat sensors appear on this same start without a reload.
+        """
+        found = any(self._is_bat(sp) for sp in self._seen_species) or any(
+            self._is_bat(sp) for counts in self._daily_counts.values() for sp in counts
+        )
+        self._bat_support = found
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={**self.config_entry.data, CONF_BAT_SUPPORT: found},
+        )
+        if found:
+            _LOGGER.info(
+                "%s has been hearing bats, so bat support is now on; turn it off "
+                "with Reconfigure if you don't want it",
+                self.device_name,
+            )
 
     def _is_bat(self, species: str) -> bool:
         """Whether a common name is a bat (see bats.is_bat_name)."""
