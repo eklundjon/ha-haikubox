@@ -20,7 +20,7 @@ from custom_components.haikubox.const import (
     TRIGGER_WATCHED_SPECIES,
 )
 
-from .coordinator_helpers import make_coordinator
+from .coordinator_helpers import ENTRY_ID, make_coordinator
 
 SERIAL = "100000003d7c9f2b"
 
@@ -49,7 +49,9 @@ def fire_ctx(hass: HomeAssistant):
     identifiers (not via the config entry), so the coordinator only needs a
     plain options dict — supplied per test through the factory.
     """
-    entry = MockConfigEntry(domain=DOMAIN, unique_id=SERIAL, data={CONF_SERIAL: SERIAL})
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=SERIAL, data={CONF_SERIAL: SERIAL}, entry_id=ENTRY_ID
+    )
     entry.add_to_hass(hass)
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, SERIAL)}
@@ -84,7 +86,7 @@ async def test_first_poll_is_silent(hass: HomeAssistant, fire_ctx) -> None:
 
 
 async def test_new_species_fires_with_lifetime_count(
-    hass: HomeAssistant, fire_ctx
+    hass: HomeAssistant, fire_ctx, caplog: pytest.LogCaptureFixture
 ) -> None:
     make, events = fire_ctx
     c = make()
@@ -98,6 +100,8 @@ async def test_new_species_fires_with_lifetime_count(
     assert fired[0]["species"] == "Barred Owl"
     assert fired[0]["lifetime_species_count"] == 3
     assert fired[0]["device_id"]  # resolved from the registry
+    # Calling the deprecated device_registry.async_get_device logs a warning (2026.9+).
+    assert "device_registry.async_get_device" not in caplog.text
 
 
 async def test_unusual_visitor_fires_past_threshold(

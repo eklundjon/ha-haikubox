@@ -19,7 +19,7 @@ from custom_components.haikubox.const import (
     EVENT_HAIKUBOX,
 )
 
-from .coordinator_helpers import make_coordinator
+from .coordinator_helpers import ENTRY_ID, make_coordinator
 
 SERIAL = "E4B063BBB044"
 _NOW = datetime.now(UTC)
@@ -55,7 +55,9 @@ def bundled_names(monkeypatch):
 
 @pytest.fixture
 def events(hass: HomeAssistant) -> list:
-    entry = MockConfigEntry(domain=DOMAIN, unique_id=SERIAL, data={CONF_SERIAL: SERIAL})
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=SERIAL, data={CONF_SERIAL: SERIAL}, entry_id=ENTRY_ID
+    )
     entry.add_to_hass(hass)
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, SERIAL)}

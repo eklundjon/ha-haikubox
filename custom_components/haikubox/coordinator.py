@@ -95,6 +95,21 @@ from .statistics import async_import_history_statistics
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def async_get_entry_device(
+    hass: HomeAssistant, identifier: tuple[str, str], entry_id: str
+) -> dr.DeviceEntry | None:
+    """The entry's device with this identifier, or None.
+
+    device_registry.async_get_device is deprecated from 2026.9 (identifiers
+    are unique per config entry now) and breaks in 2027.8. Its replacement
+    doesn't exist before 2026.8, so fall back on older versions.
+    """
+    reg = dr.async_get(hass)
+    if hasattr(reg, "async_get_device_by_identifier"):
+        return reg.async_get_device_by_identifier(identifier, entry_id)
+    return reg.async_get_device(identifiers={identifier})
+
 _STORE_VERSION = 1
 
 # Per-box .storage suffixes (each file is `haikubox.<serial>.<suffix>`). The
@@ -969,8 +984,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (e.g. `days_absent` for unusual_visitor, `lifetime_species_count` for
         new_species).
         """
-        device = dr.async_get(self.hass).async_get_device(
-            identifiers={(DOMAIN, self.serial)}
+        device = async_get_entry_device(
+            self.hass, (DOMAIN, self.serial), self.config_entry.entry_id
         )
         if device is None:
             return  # device not in the registry yet (only on first-ever setup)
