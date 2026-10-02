@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+import custom_components.haikubox as integration
 from custom_components.haikubox.const import (
     CONF_BAT_SUPPORT,
     CONF_DEVICE_NAME,
@@ -187,6 +188,42 @@ async def test_bat_sensors_follow_bat_support(hass: HomeAssistant) -> None:
     assert entry.state is ConfigEntryState.LOADED
     assert not _BAT_UNIQUE_IDS & _unique_ids()
     assert len(_unique_ids()) == 15
+
+
+async def test_reconfigure_reloads_once(hass: HomeAssistant) -> None:
+    """Reconfiguring a loaded entry reloads it exactly once (via the update
+    listener), and the new bat support setting takes effect."""
+    entry = await _setup_entry(hass, **{CONF_BAT_SUPPORT: False})
+    result = await entry.start_reconfigure_flow(hass)
+
+    with ExitStack() as stack:
+        for p in _patched_poll():
+            stack.enter_context(p)
+        stack.enter_context(
+            patch(
+                "custom_components.haikubox.config_flow.async_get_device_info",
+                return_value={"haikuboxName": "Bird Shazam"},
+            )
+        )
+        setup_spy = stack.enter_context(
+            patch.object(
+                integration, "async_setup_entry", wraps=integration.async_setup_entry
+            )
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL: SERIAL, CONF_BAT_SUPPORT: True}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert setup_spy.call_count == 1
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.data[CONF_BAT_SUPPORT] is True
+    registry = er.async_get(hass)
+    unique_ids = {
+        e.unique_id for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+    }
+    assert _BAT_UNIQUE_IDS <= unique_ids
 
 
 def _stored_history(hass_storage, days: dict) -> None:
