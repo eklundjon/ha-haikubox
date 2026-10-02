@@ -34,8 +34,12 @@ Most sensors fill in on the first poll, within about 10 minutes, as long as your
 
 These two behave differently:
 
-- **`last_detection`** is kept through restarts and outages, and always shows the last bird heard, however long ago. It's only `unknown` before your box's first ever detection. If it's `unknown` on a box that has been running a while, check the Home Assistant logs.
+- **`last_detection`** is kept through restarts and outages, and always shows the last bird heard (or bat, with bat support on), however long ago. It's only `unknown` before your box's first ever detection. If it's `unknown` on a box that has been running a while, check the Home Assistant logs.
 - **`notable_species`** only looks at the last 24 hours, so it's `unknown` whenever the box hasn't heard anything in that time. That usually means the box is offline. Check the Haikubox app to see if it's still hearing birds.
+
+## Bird counts dropped after upgrading
+
+If your Haikubox hears bats, earlier versions counted them as birds. Bird counts now leave bats out, so today's totals, top species, lifetime species and the long-term statistics can drop when you upgrade, and the statistics graph shows a one-time step. Turn on **Bat support** with **Reconfigure** to see the bats on their own sensors. See [bats.md](bats.md).
 
 ## Cards don't show up in the card picker
 

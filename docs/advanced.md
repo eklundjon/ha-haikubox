@@ -32,6 +32,8 @@ automation:
 
 This is standard Home Assistant. See [defining a custom polling interval](https://www.home-assistant.io/common-tasks/general/#defining-a-custom-polling-interval) in the HA docs.
 
-## Changing the serial number
+## Changing the serial number or bat support
 
 If you replace your Haikubox, or entered the wrong serial, go to **Settings → Devices & Services**, open the Haikubox entry, choose **Reconfigure**, and enter the new serial. Your sensor history is kept.
+
+The same **Reconfigure** form has the **Bat support** checkbox. Turning it on adds the bat sensors and events; turning it off removes them and ignores bats. See [bats.md](bats.md).

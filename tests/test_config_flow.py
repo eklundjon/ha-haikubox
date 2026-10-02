@@ -13,7 +13,12 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.haikubox import config_flow
-from custom_components.haikubox.const import CONF_DEVICE_NAME, CONF_SERIAL, DOMAIN
+from custom_components.haikubox.const import (
+    CONF_BAT_SUPPORT,
+    CONF_DEVICE_NAME,
+    CONF_SERIAL,
+    DOMAIN,
+)
 
 SERIAL = "100000003d7c9f2b"
 _DEVICE_INFO = "custom_components.haikubox.config_flow.async_get_device_info"
@@ -41,7 +46,11 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Bird Shazam"
-    assert result["data"] == {CONF_SERIAL: SERIAL, CONF_DEVICE_NAME: "Bird Shazam"}
+    assert result["data"] == {
+        CONF_SERIAL: SERIAL,
+        CONF_DEVICE_NAME: "Bird Shazam",
+        CONF_BAT_SUPPORT: False,
+    }
 
 
 async def test_user_flow_falls_back_to_serial_name(hass: HomeAssistant) -> None:
@@ -133,3 +142,53 @@ async def test_reconfigure_updates_entry(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_DEVICE_NAME] == "Bird Shazam"
+
+
+async def test_user_flow_stores_bat_support(hass: HomeAssistant) -> None:
+    """The bat support box on the setup form lands in the entry's data."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    with (
+        patch(_DEVICE_INFO, return_value={"haikuboxName": "Bat Box"}),
+        patch(_PATCH_SETUP, return_value=True),
+        patch(_PATCH_SETUP_ENTRY, return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL: SERIAL, CONF_BAT_SUPPORT: True}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_BAT_SUPPORT] is True
+
+
+async def test_reconfigure_toggles_bat_support(hass: HomeAssistant) -> None:
+    """Reconfigure shows the current setting and can change it."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=SERIAL,
+        data={CONF_SERIAL: SERIAL, CONF_DEVICE_NAME: "Box", CONF_BAT_SUPPORT: False},
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    schema = result["data_schema"].schema
+    suggested = {
+        str(k): (k.description or {}).get("suggested_value") for k in schema
+    }
+    assert suggested[CONF_SERIAL] == SERIAL
+    assert suggested[CONF_BAT_SUPPORT] is False
+
+    with (
+        patch(_DEVICE_INFO, return_value={"haikuboxName": "Box"}),
+        patch(_PATCH_SETUP, return_value=True),
+        patch(_PATCH_SETUP_ENTRY, return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL: SERIAL, CONF_BAT_SUPPORT: True}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_BAT_SUPPORT] is True

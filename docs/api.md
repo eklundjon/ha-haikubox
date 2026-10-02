@@ -29,11 +29,11 @@ sequenceDiagram
     participant Store as HA .storage JSON
     participant Sensors as Sensor entities
 
-    Note over Coord,Store: _async_setup (once, before the first poll):<br/>load 6 .storage files + warm caches
+    Note over Coord,Store: _async_setup (once, before the first poll):<br/>load 7 .storage files + warm caches
     HA->>Coord: _async_update_data() - every 10 min
 
     Coord->>API: GET /daily-count?date - newly-completed day(s) + backfill chunk
-    API-->>Coord: per-day bird counts (404 before install date)
+    API-->>Coord: per-day species counts, bats included (404 before install date)
     Note right of Coord: aggregate the trailing 365 days<br/>into the rarity baseline
     Coord->>Store: save daily_counts (if changed)
 
@@ -95,6 +95,8 @@ Records are sorted newest first. `_apply_rarity_scores` then adds `rarity_score`
 
 `_filter_by_dt(raw, threshold)` keeps the raw items with `dt` within the last `RECENT_WINDOW_HOURS` (1 by default). That filtered list is normalized separately from the 24-hour list. Filtering happens first so that `count` on `recent_detections` means "times heard in the last hour", not "in the last 24 hours".
 
+On a bird-and-bat box, the feed mixes bats in with birds, in the same shape. The poll splits them off first by species code, so everything in the table below except `last_detection` and the bat entries sees birds only. See [bats.md](bats.md#how-bats-are-recognized).
+
 Both the integration's clock and `dt` are in UTC. `dt` is parsed with `datetime.fromisoformat`, which accepts a trailing `Z` on Python 3.11 and later. A `dt` with no time zone is assumed to be UTC, and a missing or unreadable `dt` is skipped.
 
 | Sensor or feature | Data used |
@@ -102,6 +104,7 @@ Both the integration's clock and `dt` are in UTC. `dt` is parsed with `datetime.
 | `recent_detections`, new-species tracking | Items from the last hour |
 | `daily_count`, `daily_top_species`, `notable_species`, today's part of `rarest_species`, the first-install `_seen_species` seed | All 24 hours |
 | `last_detection.detections` | A saved list of the last 50 detections, topped up from each poll's 24-hour data |
+| `last_bird_detection`, `last_bat_detection`, bat `new_species` and `bat_activity` | The bats in the 24-hour data, with bat support on |
 | `new_species.detections` | The saved `_seen_species` log |
 
 ### Request volume

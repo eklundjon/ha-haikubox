@@ -5,20 +5,24 @@
         "title": "Haikubox Setup",
         "description": "Before you start: your Haikubox must be publicly shareable. Sign in at {listen_url}, turn on the \"Share your haikubox with friends\" setting, and copy the serial from the public URL the site then displays.",
         "data": {
-          "serial": "Serial number"
+          "serial": "Serial number",
+          "bat_support": "Bat support"
         },
         "data_description": {
-          "serial": "Hexadecimal code; length varies by model (e.g. 100000003d7c9f2b). Read it from your box's public URL, or its base on units that have a serial sticker."
+          "serial": "Hexadecimal code; length varies by model (e.g. 100000003d7c9f2b). Read it from your box's public URL, or its base on units that have a serial sticker.",
+          "bat_support": "Turn on if your Haikubox can detect bats. Bats get their own sensors and events, and bird counts never include them. You can change this later with Reconfigure."
         }
       },
       "reconfigure": {
         "title": "Reconfigure Haikubox",
-        "description": "Update the serial number for your Haikubox.",
+        "description": "Update the serial number or bat support for your Haikubox.",
         "data": {
-          "serial": "Serial number"
+          "serial": "Serial number",
+          "bat_support": "Bat support"
         },
         "data_description": {
-          "serial": "The serial code for your Haikubox device"
+          "serial": "The serial code for your Haikubox device",
+          "bat_support": "Bats get their own sensors and events. Turning this off removes those and ignores bats entirely. Bird counts never include bats either way."
         }
       }
     },
@@ -95,7 +99,8 @@
     "trigger_type": {
       "new_species": "New species detected",
       "unusual_visitor": "Unusual visitor detected",
-      "watched_species": "Watched species detected"
+      "watched_species": "Watched species detected",
+      "bat_activity": "Bat activity started"
     }
   },
   "entity": {
@@ -141,6 +146,18 @@
       },
       "watched_species": {
         "name": "Watched species"
+      },
+      "last_bird_detection": {
+        "name": "Last bird detection"
+      },
+      "last_bat_detection": {
+        "name": "Last bat detection"
+      },
+      "bat_count_today": {
+        "name": "Bat detections today"
+      },
+      "bats_today": {
+        "name": "Bats today"
       }
     },
     "binary_sensor": {

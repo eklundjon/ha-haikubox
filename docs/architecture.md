@@ -36,7 +36,7 @@ graph TB
     subgraph External
         API["api.haikubox.com"]
         S3["haikubox-images S3"]
-        HAStore["HA .storage/<br/>6 JSON files"]
+        HAStore["HA .storage/<br/>7 JSON files"]
         WWW["config/haikubox/<br/>cached photos + audio"]
     end
 
@@ -68,23 +68,24 @@ custom_components/haikubox/
 ├── __init__.py           # setup and teardown, migrations, cache static path, card registration
 ├── api.py                # HaikuboxApiClient (all HTTP) and the setup-time device check
 ├── audio_cache.py        # AudioCache: download, normalize and prune detection clips
+├── bats.py               # telling bats from birds: codes, names, splitting feeds and counts
 ├── binary_sensor.py      # extended-silence binary sensor
 ├── card_loader.py        # copies the card loader to config/www and registers it as a resource
 ├── config_flow.py        # config flow (setup and reconfigure) and options flow
 ├── const.py              # domain, config keys, tuning constants, event and trigger names
 ├── coordinator.py        # HaikuboxCoordinator: runs each poll
-├── device_trigger.py     # new_species / unusual_visitor / watched_species triggers
+├── device_trigger.py     # new_species / unusual_visitor / watched_species / bat_activity triggers
 ├── diagnostics.py        # redacted state dump
 ├── entity.py             # HaikuboxEntity: shared device info for the platforms
 ├── image_cache.py        # ImageCache: download each species photo once, serve it locally
 ├── manifest.json         # the version here is the release version
 ├── normalize.py          # response parsing, rarity and notability scoring, link URLs
-├── sensor.py             # 14 sensor classes
+├── sensor.py             # 14 sensor classes, plus 4 with bat support on
 ├── statistics.py         # long-term statistics backfill
 ├── strings.json          # translation keys and display names
 ├── translations/
 │   └── en.json
-├── data/                 # eBird common name → code / scientific name map, plus NOTICE
+├── data/                 # eBird common name → code / scientific name map, USGS bat list, NOTICE
 ├── brand/                # logo and icon (also in home-assistant/brands)
 └── www/
     ├── haikubox-bird-card.js     # single-bird card
@@ -118,7 +119,8 @@ flowchart TD
     EnsureDaily[_ensure_daily_counts<br/>new completed day + backfill chunk<br/>via /daily-count?date] --> Rebuild[_rebuild_baseline<br/>aggregate trailing 365d<br/>→ rank lookup]
     Rebuild --> FetchDetections
 
-    FetchDetections[GET /detections?hours=24] --> FilterRecent[_filter_by_dt<br/>raw items where<br/>dt &gt; now - 1h]
+    FetchDetections[GET /detections?hours=24] --> Split[split_detections<br/>birds → the steps below<br/>bats → bat records and events]
+    Split --> FilterRecent[_filter_by_dt<br/>raw items where<br/>dt &gt; now - 1h]
     FilterRecent --> NormaliseRecent[_normalise_detections<br/>on recent subset<br/>+ _apply_rarity_scores]
     NormaliseRecent --> NormaliseDaily[_normalise_detections<br/>on full 24h →<br/>daily_count + rarity]
 
@@ -146,6 +148,7 @@ Each step waits for the one before it. There's no `asyncio.gather` and no backgr
 - The 24-hour list has to exist before the `_seen_species` seed. The seed runs before new-species tracking so a new install is seeded from the full 24 hours, not just the last hour (issue #14).
 - `rarest_species` uses the last 7 days of `daily_counts` plus today's 24-hour list, so birds heard 1–24 hours ago count toward today (issue #15).
 - `last_detection` reads a saved list of recent events. Each poll's events (`_build_recent_events`) are merged in, with duplicates removed and a cap of 50, so it survives restarts and outages (issue #62). `notable_species` isn't saved. It empties with its 24-hour window and becomes `unknown`.
+- Bats are split off right after the fetch (`bats.split_detections`), so every step in the diagram works on birds only. With bat support on, the bat items feed the mixed `last_detection` buffer, the per-class `last_by_class` records, bat `new_species`/`watched_species`, and `bat_activity`. The stored daily history keeps bat rows; the bird calculations read `_bird_days`, a view without them.
 - Notability is scored last. It reads `notable_rarity_weight` from `entry.options` and adds `notability_score` to each 24-hour record.
 
 ### One data dict
@@ -155,6 +158,7 @@ Each poll returns one `dict[str, Any]`. Most keys match sensor names. The except
 - **Single records are kept apart from their lists:** `last_detection` (the newest saved event) and `recent_events` (the list); `notable_detection` (the current top, or `None`) and `notable_detections`; `new_detection` and `new_detections`. `last_detection` and `new_detection` are saved. `notable_detection` isn't, and becomes `None` (so the sensor is `unknown`) when its 24-hour window is empty (issue #62).
 - **`recent_events`** is the per-detection list behind `last_detection`'s `detections` attribute: the last 50 detections, newest first, with duplicates removed.
 - **`lifetime_species_count`** is a single number, shown as an attribute on `new_species`.
+- **The bat keys** (`last_bird_detection`, `last_bat_detection`, `bat_today_total`, `bats_today`) are always present, so turning bat support on changes nothing but which sensors exist. With it off they're empty, apart from `last_bird_detection`, which no sensor reads then.
 
 This dict is the contract between the coordinator and the sensors:
 
@@ -182,6 +186,7 @@ Local variables in `_async_update_data`: `detections` (last hour, newest first),
 | `_last_seen: dict[str, str]` | `haikubox.<serial>.last_seen` | `_async_setup` |
 | `_daily_counts: dict[str, dict[str, int]]` for the life of the box. `_baseline_ranks`, `_baseline_species_count` and `_baseline_items` are rebuilt from it. | `haikubox.<serial>.daily_counts` | `_async_setup`, which also rebuilds the baseline |
 | `_event_buffer: list[dict]`, the last 50 detections behind `last_detection` | `haikubox.<serial>.recent_events` | `_async_setup` |
+| `_last_by_class: dict`, the newest bird and newest bat detection, kept apart from the event list so a night of bats can't push out the last bird | `haikubox.<serial>.last_by_class` | `_async_setup` |
 
 Each file is only written when its data changes, tracked with a dirty flag. The event list, for example, is only written when a poll adds a new detection.
 

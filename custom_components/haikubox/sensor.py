@@ -10,10 +10,11 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_SERIAL
+from .const import CONF_BAT_SUPPORT, CONF_SERIAL, DEFAULT_BAT_SUPPORT, DOMAIN
 from .coordinator import HaikuboxConfigEntry, HaikuboxCoordinator
 from .entity import HaikuboxEntity
 
@@ -46,6 +47,24 @@ async def async_setup_entry(
             HaikuboxWatchedSpeciesSensor(coordinator, serial),
         ]
     )
+
+    bat_sensors = [
+        HaikuboxLastBirdDetectionSensor(coordinator, serial),
+        HaikuboxLastBatDetectionSensor(coordinator, serial),
+        HaikuboxBatCountSensor(coordinator, serial),
+        HaikuboxBatsTodaySensor(coordinator, serial),
+    ]
+    if entry.data.get(CONF_BAT_SUPPORT, DEFAULT_BAT_SUPPORT):
+        async_add_entities(bat_sensors)
+    else:
+        # Bat support turned off (via reconfigure): remove the bat entities
+        # rather than leave them behind as "unavailable".
+        registry = er.async_get(hass)
+        for sensor in bat_sensors:
+            if entity_id := registry.async_get_entity_id(
+                "sensor", DOMAIN, sensor.unique_id
+            ):
+                registry.async_remove(entity_id)
 
 
 class _HaikuboxSensor(HaikuboxEntity, SensorEntity):
@@ -118,6 +137,81 @@ class HaikuboxLastDetectionSensor(_HaikuboxSensor):
         # rich data — no top-level scientific_name/sp_code/last_seen/
         # image_url duplicates needed.
         return {"detections": self.coordinator.data.get("recent_events", [])}
+
+
+class HaikuboxLastBirdDetectionSensor(HaikuboxLastDetectionSensor):
+    """The most recent bird, when bat support makes last_detection a mix of
+    birds and bats. Kept from its own persisted record, so a night of bats
+    can't push it out across a restart."""
+
+    _attr_translation_key = "last_bird_detection"
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_last_bird_detection"
+
+    def _latest(self) -> dict | None:
+        return self.coordinator.data.get("last_bird_detection")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        d = self._latest()
+        return {"detections": [d] if d else []}
+
+
+class HaikuboxLastBatDetectionSensor(HaikuboxLastBirdDetectionSensor):
+    """The most recent bat (bat support only)."""
+
+    _attr_translation_key = "last_bat_detection"
+    _attr_icon = "mdi:bat"
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_last_bat_detection"
+
+    def _latest(self) -> dict | None:
+        return self.coordinator.data.get("last_bat_detection")
+
+
+class HaikuboxBatCountSensor(_HaikuboxSensor):
+    """Bat detections so far today, from /daily-count — the bat counterpart of
+    "Detections today", and like it a counter that resets at the box's local
+    midnight (bat support only)."""
+
+    _attr_translation_key = "bat_count_today"
+    _attr_icon = "mdi:bat"
+    _attr_native_unit_of_measurement = "detections"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_bat_count_today"
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.data.get("bat_today_total", 0)
+
+
+class HaikuboxBatsTodaySensor(_HaikuboxSensor):
+    """Today's bats by true detection count — the bat counterpart of "Top
+    species (today)", and the sensor for a bat list card (bat support only)."""
+
+    _attr_translation_key = "bats_today"
+    _attr_icon = "mdi:bat"
+    _attr_native_unit_of_measurement = "species"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HaikuboxCoordinator, serial: str) -> None:
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_bats_today"
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.get("bats_today", []))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"detections": self.coordinator.data.get("bats_today", [])}
 
 
 class HaikuboxDailyCountSensor(_HaikuboxSensor):

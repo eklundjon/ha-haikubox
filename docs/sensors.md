@@ -7,7 +7,7 @@ Each Haikubox gets one device in Home Assistant, and all of its entities live un
 | Entity | State | Useful attributes |
 |---|---|---|
 | `sensor.recent_detections` | Number of species heard in the last hour | `detections`, one per species, most recent first |
-| `sensor.last_detection` | The most recent bird heard, however long ago. Keeps its value through restarts and outages. | `detections`, the last 50 individual detections, newest first |
+| `sensor.last_detection` | The most recent bird heard, however long ago (or bat, with [bat support](bats.md) on). Keeps its value through restarts and outages. | `detections`, the last 50 individual detections, newest first |
 | `sensor.notable_species` | The most notable bird of the last 24 hours. `unknown` if nothing was heard. | `detections` ranked by notability; `rarity_score`, `yearly_rank` |
 | `sensor.new_species` | The most recent bird heard for the first time on this box | `detections`, the last 50 first-time birds; `lifetime_species_count` |
 | `sensor.daily_count` | Total detections today. Resets at midnight in the box's time zone. | None |
@@ -20,6 +20,8 @@ Each Haikubox gets one device in Home Assistant, and all of its entities live un
 | `sensor.new_species_window` | Number of species heard for the first time in the last 30 days | `days_since_new_species` |
 | `sensor.history_start` | Diagnostic. The earliest day of history the integration has downloaded. | `days_recorded`, `days_span`, `backfill_complete` |
 | `sensor.watched_species` | How many of your watched species the box has heard | `detections`, your watched species, most recently heard first |
+
+With bat support on, four bat sensors are added, and `sensor.last_detection` can be a bat. Bird sensors never count bats. See [bats.md](bats.md).
 
 ### `sensor.lifetime_species`
 
@@ -117,5 +119,6 @@ The integration keeps these files in Home Assistant's `.storage` folder:
 | `haikubox.<serial>.sp_codes` | Species code for each species |
 | `haikubox.<serial>.sci_names` | Scientific name for each species |
 | `haikubox.<serial>.last_seen` | When each species was last heard |
-| `haikubox.<serial>.daily_counts` | Daily species counts for the life of the box. Rarity and the 7-day rarest list come from this. |
+| `haikubox.<serial>.daily_counts` | Daily species counts for the life of the box, bats included. Rarity and the 7-day rarest list come from this, leaving the bats out. |
 | `haikubox.<serial>.recent_events` | The last 50 detections, for `last_detection` |
+| `haikubox.<serial>.last_by_class` | The newest bird and the newest bat, for `last_bird_detection` and `last_bat_detection` |

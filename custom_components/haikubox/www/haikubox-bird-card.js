@@ -984,7 +984,7 @@ if (!customElements.get("haikubox-bird-card")) {
     window.customCards.push({
       type: "haikubox-bird-card",
       name: "Haikubox Bird Card",
-      description: "Displays a Haikubox bird detection with photo, species name, and timestamp.",
+      description: "Displays a Haikubox bird or bat detection with photo, species name, and timestamp.",
     });
   }
 }

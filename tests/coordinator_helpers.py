@@ -23,6 +23,7 @@ _STORE_ATTRS = (
     "_last_seen_store",
     "_daily_store",
     "_events_store",
+    "_by_class_store",
 )
 
 
@@ -73,6 +74,9 @@ def make_coordinator(hass, *, config_entry=None, options=None, **attrs):
     c._audio_enabled = False
     c._latest_wav_by_species = {}
     c._event_buffer = []
+    c._bat_support = False
+    c._last_by_class = {"bird": None, "bat": None}
+    c._prev_recent_bats = None
     c._prev_recent_species = None
     c._reconciled_once = False
     c._seen_species = {}

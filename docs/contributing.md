@@ -28,11 +28,11 @@ uv pip install --python .venv-test/bin/python -r requirements_test.txt
 .venv-test/bin/python -m pytest -k rarity             # by keyword
 ```
 
-There are about 80 tests in `tests/`, mostly one file per module (`test_api.py`, `test_image_cache.py`, `test_device_trigger.py`, and so on). The coordinator's tests are split across several files by topic: `test_coordinator_pure.py`, `_rarity`, `_backfill`, `_events`, `_statistics` and `_update`.
+There are about 115 tests in `tests/`, mostly one file per module (`test_api.py`, `test_image_cache.py`, `test_device_trigger.py`, `test_bats.py`, and so on). The coordinator's tests are split across several files by topic: `test_coordinator_pure.py`, `_rarity`, `_backfill`, `_events`, `_statistics`, `_update` and `_bats`.
 
 ### Building a coordinator in tests
 
-The real coordinator `__init__` sets up an aiohttp session, six `Store` objects, the photo and audio caches, and the `DataUpdateCoordinator` base. Most tests don't need any of that:
+The real coordinator `__init__` sets up an aiohttp session, seven `Store` objects, the photo and audio caches, and the `DataUpdateCoordinator` base. Most tests don't need any of that:
 
 - **`tests/coordinator_helpers.py`**: `make_coordinator(hass, ...)` creates a `HaikuboxCoordinator` with `__new__`, skipping `__init__`, and sets only what the test needs. It uses simple fakes (`FakeStore`, `FakeImages`) and sets the box's time zone to UTC. Tests that run a whole poll stub `c._fetch_*` and `c._async_box_tz` on the instance.
 - **`tests/conftest.py`**: turns on `enable_custom_integrations` for every test so HA will load the integration, and has a `bypass_frontend_setup` fixture that stubs out `frontend`. The real frontend needs the large `home-assistant-frontend` package, which PHACC doesn't include, and the tests don't touch the UI anyway.

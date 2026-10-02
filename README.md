@@ -9,7 +9,7 @@ This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com
 ## Features
 
 - **Recent detections.** Species heard in the last hour, updated every 10 minutes.
-- **Last detection.** The most recent bird the box heard. It keeps its value through restarts and quiet spells.
+- **Last detection.** The most recent bird (or, with bat support on, bat) the box heard. It keeps its value through restarts and quiet spells.
 - **Notable species.** The most interesting bird of the last 24 hours, scored on how rare it is at your box and how recently it was heard. You can adjust the balance between the two in the integration's options.
 - **New species.** Birds heard for the first time ever on your box.
 - **24-hour counts.** Total detections and top species over the last day.
@@ -19,6 +19,7 @@ This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com
 - **Play the call.** A play button on the cards plays the detection's recording in your browser. This is off by default. Turn it on in the integration's options.
 - **Automations.** Device triggers for new species, unusual visitors and species you're watching for, plus four blueprints for photo notifications and playing a call on a speaker ([one-click import](docs/automations.md#importing-a-blueprint)).
 - **Watched species.** Pick birds you want to hear about and get a trigger when one shows up.
+- **Bats.** On a bird-and-bat Haikubox, turn on bat support for bat sensors, a bat list card and a "bat activity" trigger. Bird counts never include bats ([details](docs/bats.md)).
 - Bird photos are cached locally, so cards keep working if the Haikubox servers are down.
 
 ## Quick start
@@ -50,7 +51,7 @@ The integration reads from the public Haikubox API, which only knows about boxes
 
 1. Go to **Settings → Devices & Services → Add Integration**.
 2. Search for **Haikubox**.
-3. Paste your serial number.
+3. Paste your serial number. If your Haikubox hears bats as well as birds, tick **Bat support** (see [docs/bats.md](docs/bats.md)). You can change this later with **Reconfigure**.
 
 The integration checks the serial with Haikubox and creates a device named after your box (mine is "Bird Shazam"). Its sensors are listed in [docs/sensors.md](docs/sensors.md).
 
@@ -88,7 +89,8 @@ entities:
 | Every sensor, the `detections` attribute, how rarity is scored, what's saved between restarts | [docs/sensors.md](docs/sensors.md) |
 | The two cards, YAML examples, tap actions, a sample dashboard | [docs/cards.md](docs/cards.md) |
 | Device triggers, the `haikubox_event` event, notification blueprints | [docs/automations.md](docs/automations.md) |
-| Advanced options (windows and polling), changing the serial number | [docs/advanced.md](docs/advanced.md) |
+| Bat support: what it adds, and how bats are kept out of bird counts | [docs/bats.md](docs/bats.md) |
+| Advanced options (windows and polling), changing the serial number or bat support | [docs/advanced.md](docs/advanced.md) |
 | Setup problems, cards not loading, sensors that look empty, upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Which Haikubox API calls the integration makes and when | [docs/api.md](docs/api.md) |
 | How the code is organized | [docs/architecture.md](docs/architecture.md) |

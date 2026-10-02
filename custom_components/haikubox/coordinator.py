@@ -19,14 +19,26 @@ from homeassistant.util import dt as dt_util
 
 from .api import HaikuboxApiClient
 from .audio_cache import AudioCache
+from .bats import (
+    BAT,
+    BIRD,
+    async_load_bat_names,
+    classification,
+    is_bat_code,
+    is_bat_name,
+    split_counts,
+    split_detections,
+)
 from .const import (
     ACTIVITY_BASELINE_DAYS,
     BACKFILL_REQUEST_DELAY,
     BACKFILL_STOP_AFTER_404,
+    BAT_ACTIVITY_QUIET_MINUTES,
     CONF_ABSENCE_DAYS,
     CONF_AUDIO_CACHE_DAYS,
     CONF_AUDIO_ENABLED,
     CONF_AUDIO_NORM_TARGET,
+    CONF_BAT_SUPPORT,
     CONF_DEVICE_NAME,
     CONF_NEW_SPECIES_WINDOW_DAYS,
     CONF_NOTABLE_RARITY_WEIGHT,
@@ -41,6 +53,7 @@ from .const import (
     DEFAULT_AUDIO_CACHE_DAYS,
     DEFAULT_AUDIO_ENABLED,
     DEFAULT_AUDIO_NORM_TARGET,
+    DEFAULT_BAT_SUPPORT,
     DEFAULT_NOTABLE_RARITY_WEIGHT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -55,6 +68,7 @@ from .const import (
     RARITY_BACKFILL_CHUNK,
     RARITY_WINDOW_DAYS,
     RECENT_WINDOW_HOURS,
+    TRIGGER_BAT_ACTIVITY,
     TRIGGER_NEW_SPECIES,
     TRIGGER_UNUSUAL_VISITOR,
     TRIGGER_WATCHED_SPECIES,
@@ -95,6 +109,7 @@ _STORE_SUFFIXES = (
     "last_seen",
     "daily_counts",
     "recent_events",
+    "last_by_class",
 )
 _LEGACY_STORE_SUFFIXES = ("yearly", "seven_day", "sticky")
 
@@ -203,6 +218,18 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the last 24 h", so it drains to unknown with its window.
         self._event_buffer: list[dict[str, Any]] = []
 
+        # Bat support (entry data, changed via reconfigure, which reloads). Off:
+        # bats are dropped at the door. On: they get their own sensors and
+        # events. Bird figures exclude bats either way (see bats.py).
+        self._bat_support: bool = entry.data.get(CONF_BAT_SUPPORT, DEFAULT_BAT_SUPPORT)
+        # The newest bird and newest bat event, persisted on their own: the
+        # shared 50-event buffer can be a single night of bats, so deriving
+        # last_bird_detection from it would lose the bird after a restart.
+        self._last_by_class: dict[str, dict[str, Any] | None] = {BIRD: None, BAT: None}
+        # Bats in the recent window on the previous poll (edge detection for
+        # bat watched_species), like _prev_recent_species for birds.
+        self._prev_recent_bats: set[str] | None = None
+
         # Persistent stores. Kept as SEPARATE files on purpose — do NOT merge
         # them into one combined store. Each is saved independently (gated by its
         # own dirty flag), and they change at very different cadences: last_seen
@@ -219,6 +246,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_seen_store  = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_seen")
         self._daily_store      = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.daily_counts")
         self._events_store     = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.recent_events")
+        self._by_class_store   = Store(hass, _STORE_VERSION, f"{DOMAIN}.{serial}.last_by_class")
 
         # In-memory store state
         self._seen_species: dict[str, str] = {}          # species → first_seen ISO
@@ -327,9 +355,18 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.warning("Could not import history statistics: %s", err)
 
         try:
-            daily_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
+            fetched_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with Haikubox API: {err}") from err
+
+        # Split off the bats. Everything below that works on `daily_raw` is the
+        # bird pipeline and sees birds only; bats go through _update_bats, and
+        # only when bat support is on. last_detection is the one shared view.
+        daily_raw, bat_raw = split_detections(fetched_raw)
+        if not self._bat_support:
+            bat_raw = {"detections": []}
+        # Captured before the bootstrap below seeds it, so bats seed too.
+        fresh_install = not self._seen_species
 
         # Single API call: the 24h window is a superset of the 1h window we
         # used to fetch separately. Derive the recent subset client-side at
@@ -452,6 +489,31 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 seen_dirty = True
 
+        # Bats get the same lookups (their codes are what lets bats.is_bat_name
+        # recognise them in /daily-count) and, on a fresh install, the same
+        # first-seen seeding as the birds above, so they don't all fire as new.
+        bat_24h = _normalise_detections(bat_raw)
+        bat_first_seen = _first_seen_per_species(bat_raw) if fresh_install else {}
+        for d in bat_24h:
+            sp = d["species"]
+            if not sp:
+                continue
+            if d.get("sp_code"):
+                await self._images.async_fetch(d["sp_code"])
+                if sp not in self._sp_codes:
+                    self._sp_codes[sp] = d["sp_code"]
+                    sp_codes_dirty = True
+            if d.get("scientific_name") and sp not in self._sci_names:
+                self._sci_names[sp] = d["scientific_name"]
+                sci_names_dirty = True
+            ts = d.get("last_seen")
+            if ts and ts > self._last_seen.get(sp, ""):
+                self._last_seen[sp] = ts
+                last_seen_dirty = True
+            if fresh_install and sp not in self._seen_species:
+                self._seen_species[sp] = bat_first_seen.get(sp) or ts or today.isoformat()
+                seen_dirty = True
+
         if sp_codes_dirty:
             await self._sp_codes_store.async_save(self._sp_codes)
         if sci_names_dirty:
@@ -471,6 +533,19 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if sp not in self._seen_species:
                 self._seen_species[sp] = d.get("last_seen") or today.isoformat()
                 newly_seen.add(sp)
+                seen_dirty = True
+        # The same for bats in the recent window (empty when bat support is off).
+        bat_recent = _normalise_detections(
+            {"detections": _filter_by_dt(bat_raw, recent_threshold)}
+        )
+        for d in bat_recent:
+            d["image_url"] = self._images.url_for(d.get("sp_code"))
+        newly_seen_bats: set[str] = set()
+        for d in bat_recent:
+            sp = d["species"]
+            if sp and sp not in self._seen_species:
+                self._seen_species[sp] = d.get("last_seen") or today.isoformat()
+                newly_seen_bats.add(sp)
                 seen_dirty = True
         if seen_dirty:
             await self._store.async_save(self._seen_species)
@@ -509,19 +584,44 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # and outages (#62). Build this poll's events (they still carry their
         # transient `wav` for the audio fetch below), merge the new ones into the
         # buffer, and persist when it changes.
+        # With bat support on, the buffer (and so last_detection) takes birds
+        # and bats alike; each event is tagged with its classification.
         poll_events = _build_recent_events(
-            daily_raw,
+            {"detections": daily_raw["detections"] + bat_raw["detections"]},
             self._baseline_ranks,
             self._baseline_species_count,
             self._images.url_for,
             LAST_DETECTION_EVENT_LIMIT,
         )
+        for ev in poll_events:
+            ev["classification"] = classification(ev.get("sp_code"))
         if self._merge_event_buffer(poll_events):
             await self._events_store.async_save(self._event_buffer)
+
+        # The newest bird and bats, each from its own class's detections: the
+        # mixed list above is capped at the newest events, which on a busy
+        # morning are all birds (and on a busy night all bats).
+        bird_head = _build_recent_events(
+            daily_raw, self._baseline_ranks, self._baseline_species_count,
+            self._images.url_for, 1,
+        )
+        bat_events = _build_recent_events(
+            bat_raw, self._baseline_ranks, self._baseline_species_count,
+            self._images.url_for, LAST_DETECTION_EVENT_LIMIT,
+        )
+        for ev in bird_head:
+            ev["classification"] = BIRD
+        for ev in bat_events:
+            ev["classification"] = BAT
+        prior_bat = self._last_by_class[BAT]
+        if self._update_last_by_class(bird_head + bat_events):
+            await self._by_class_store.async_save(self._last_by_class)
 
         # Fire automation events (new_species / unusual_visitor) for this
         # poll's qualifying species, then advance the recent-window baseline.
         self._fire_detection_events(detections, newly_seen, prior_last_seen)
+        if self._bat_support:
+            self._fire_bat_events(bat_recent, newly_seen_bats, bat_events, prior_bat)
 
         # Detection audio: download clips while their ~1h presigned URLs are
         # fresh, then prune. ALWAYS cache the headline records (last + notable)
@@ -538,7 +638,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for wav in self._latest_wav_by_species.values():
                     await self._audio.async_fetch(wav)
                 for ev in poll_events:
-                    if ev.get("wav"):
+                    if ev.get("wav") and ev.get("classification") != BAT:
                         await self._audio.async_fetch(ev["wav"])
             else:
                 headline = {
@@ -559,10 +659,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Today is a partial, still-accumulating calendar day; fetched fresh
         # each poll. (See issue #44 re: daily_count's capped-feed undercount.)
         try:
-            today_species = await self._fetch_daily_count(today.isoformat()) or {}
+            today_all = await self._fetch_daily_count(today.isoformat()) or {}
         except aiohttp.ClientError as err:
             _LOGGER.warning("Could not fetch today's daily count: %s", err)
-            today_species = {}
+            today_all = {}
+        today_species, today_bats = split_counts(today_all, self._is_bat)
         today_total = sum(today_species.values())
 
         # Activity-vs-typical and new-species-momentum figures (store-only).
@@ -607,7 +708,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # populated forever after.
             "new_detections": _ranked(self._with_links(self._build_new_species_history())),
             "new_detection": self._build_last_new_species(), # sticky
-            "lifetime_species_count": len(self._seen_species),
+            "lifetime_species_count": self.lifetime_species_count,
             "yearly_top_species": self._with_links(self._build_baseline_top()),  # by trailing-window count (own rank)
             "rarest_species": _ranked(self._with_links(seven_day_rare)),       # by rarity
             "watched_species": _ranked(self._with_links(self._build_watched())),  # user watch-list, by recency
@@ -624,6 +725,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "history_earliest": min(self._daily_counts) if self._daily_counts else None,
             "history_days_recorded": len(self._daily_counts),
             "history_complete": self._backfill_complete,
+            # Bat sensors (only created with bat support on; the keys are
+            # always present so turning it on needs no other change).
+            "last_bird_detection": self._class_head(BIRD),
+            "last_bat_detection": self._class_head(BAT),
+            "bat_today_total": sum(today_bats.values()) if self._bat_support else 0,
+            "bats_today": (
+                _ranked(self._with_links(self._build_bats_today(today_bats)))
+                if self._bat_support else []
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -701,11 +811,113 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         names += [ln.strip() for ln in (opts.get(CONF_WATCHED_EXTRA) or "").splitlines()]
         return {n.casefold() for n in names if n.strip()}
 
+    def _fire_bat_events(
+        self,
+        bat_recent: list[dict[str, Any]],
+        newly_seen_bats: set[str],
+        bat_events: list[dict[str, Any]],
+        prior_bat: dict[str, Any] | None,
+    ) -> None:
+        """Fire this poll's bat events: new_species and watched_species exactly
+        as for birds, and bat_activity when bats are heard after at least
+        BAT_ACTIVITY_QUIET_MINUTES without one. Bats aren't rarity-ranked, so
+        there's no unusual_visitor for them. `bat_events` is this poll's bat
+        events; `prior_bat` is the newest bat event as it was before this
+        poll."""
+        by_species = {d["species"]: d for d in bat_recent if d.get("species")}
+        bat_species_seen = sum(1 for sp in self._seen_species if self._is_bat(sp))
+        for sp in newly_seen_bats:
+            self._fire_event(
+                TRIGGER_NEW_SPECIES, by_species[sp], lifetime_species_count=bat_species_seen
+            )
+
+        current = set(by_species)
+        watched = self._watched_species()
+        if watched and self._prev_recent_bats is not None:
+            for sp in current - self._prev_recent_bats:
+                if sp.casefold() in watched:
+                    self._fire_event(TRIGGER_WATCHED_SPECIES, by_species[sp])
+        self._prev_recent_bats = current
+
+        # No previous bat (first run, or bats newly enabled): nothing to measure
+        # a quiet spell against, so this poll only establishes the baseline.
+        prior_dt = _parse_dt(prior_bat.get("last_seen")) if prior_bat else None
+        if prior_dt is None:
+            return
+        new_bats = [
+            ev for ev in bat_events
+            if (dt := _parse_dt(ev.get("last_seen"))) is not None
+            and dt > prior_dt
+        ]
+        if not new_bats:
+            return
+        first = min(_parse_dt(ev["last_seen"]) for ev in new_bats)
+        quiet = first - prior_dt
+        if quiet >= timedelta(minutes=BAT_ACTIVITY_QUIET_MINUTES):
+            newest = max(new_bats, key=lambda ev: _parse_dt(ev["last_seen"]))
+            self._fire_event(
+                TRIGGER_BAT_ACTIVITY,
+                newest,
+                count=len(new_bats),
+                quiet_minutes=int(quiet.total_seconds() // 60),
+            )
+
+    def _update_last_by_class(self, events: list[dict[str, Any]]) -> bool:
+        """Keep the newest bird and newest bat event, given candidates tagged
+        with their classification. Returns whether either changed (→ persist)."""
+        changed = False
+        for cls in (BIRD, BAT):
+            stored = self._last_by_class[cls]
+            stored_dt = _parse_dt(stored.get("last_seen")) if stored else None
+            for ev in events:
+                if ev.get("classification") != cls:
+                    continue
+                dt = _parse_dt(ev.get("last_seen"))
+                if dt is not None and (stored_dt is None or dt > stored_dt):
+                    stored = {k: v for k, v in ev.items() if k != "wav"}
+                    stored_dt = dt
+                    changed = True
+            self._last_by_class[cls] = stored
+        return changed
+
+    def _class_head(self, cls: str) -> dict[str, Any] | None:
+        """Display copy of the newest bird or bat event (fresh image, links)."""
+        rec = self._last_by_class[cls]
+        if rec is None:
+            return None
+        rec = dict(rec)
+        img = self._images.url_for(rec.get("sp_code"))
+        if img:
+            rec["image_url"] = img
+        return self._with_links([rec])[0]
+
+    def _build_bats_today(self, today_bats: dict[str, int]) -> list[dict[str, Any]]:
+        """Today's bats by TRUE detection count (from /daily-count), the bat
+        counterpart of daily_top_species — without rarity, which is a bird
+        measure."""
+        result = []
+        for sp, count in today_bats.items():
+            sp_code = self._sp_codes.get(sp, "")
+            result.append({
+                "species": sp,
+                "scientific_name": self._sci_names.get(sp, ""),
+                "sp_code": sp_code,
+                "image_url": self._images.url_for(sp_code),
+                "last_seen": self._last_seen.get(sp),
+                "count": count,
+                "classification": BAT,
+            })
+        result.sort(key=lambda x: x["count"], reverse=True)
+        return result
+
     @property
     def known_species(self) -> list[str]:
         """Species this box has been seen to detect (for the watch-list picker
-        in the options flow), sorted alphabetically."""
-        return sorted(self._seen_species)
+        in the options flow), sorted alphabetically. Bats only with bat
+        support on."""
+        return sorted(
+            sp for sp in self._seen_species if self._bat_support or not self._is_bat(sp)
+        )
 
     def _links_for(self, species: str, sp_code: str, scientific_name: str) -> dict[str, Any]:
         """Reference-link URLs for a record, surfaced by the integration so the
@@ -713,12 +925,14 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         no upstream URLs, so all are templated: eBird and Macaulay Library from
         the species code, All About Birds from the common name (all share eBird's
         taxonomy), and Wikipedia from the scientific name (binomials resolve
-        reliably via Wikipedia redirects)."""
+        reliably via Wikipedia redirects). Bats get only Wikipedia: eBird, All
+        About Birds and Macaulay Library are bird references."""
+        bat = is_bat_code(sp_code) or self._is_bat(species)
         return {
-            "ebird_url": _ebird_url(sp_code),
+            "ebird_url": None if bat else _ebird_url(sp_code),
             "wikipedia_url": _wikipedia_url(scientific_name),
-            "allaboutbirds_url": _allaboutbirds_url(species),
-            "macaulay_url": _ml_url(sp_code),
+            "allaboutbirds_url": None if bat else _allaboutbirds_url(species),
+            "macaulay_url": None if bat else _ml_url(sp_code),
         }
 
     def _with_links(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -734,9 +948,11 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             )
             wav = r.pop("wav", None) or self._latest_wav_by_species.get(r.get("sp_code", ""))
+            # No audio for bats yet: their ultrasonic clips need processing to
+            # be audible, which is planned separately.
             r["audio_url"] = (
                 self._audio.url_for(wav)
-                if (self._audio_enabled and self._audio)
+                if (self._audio_enabled and self._audio and not is_bat_code(r.get("sp_code")))
                 else None
             )
         return records
@@ -759,9 +975,15 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if device is None:
             return  # device not in the registry yet (only on first-ever setup)
         sp_code = record.get("sp_code", "")
+        cls = record.get("classification") or classification(sp_code)
         # Resolve the species' most-recent cached clip to a stable /local URL
-        # (None when audio is off or the clip isn't cached). Pure in-memory lookup.
-        wav = self._latest_wav_by_species.get(sp_code) if self._audio_enabled else None
+        # (None when audio is off or the clip isn't cached; never for bats).
+        # Pure in-memory lookup.
+        wav = (
+            self._latest_wav_by_species.get(sp_code)
+            if self._audio_enabled and cls != BAT
+            else None
+        )
         self.hass.bus.async_fire(
             EVENT_HAIKUBOX,
             {
@@ -769,6 +991,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "serial": self.serial,
                 "device_name": self.device_name,
                 "type": trigger_type,
+                "classification": cls,
                 "species": record.get("species"),
                 "scientific_name": record.get("scientific_name"),
                 "sp_code": sp_code,
@@ -803,6 +1026,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         last_seen = await self._last_seen_store.async_load()
         daily     = await self._daily_store.async_load()
         events    = await self._events_store.async_load()
+        by_class  = await self._by_class_store.async_load()
 
         self._seen_species   = seen      if isinstance(seen, dict)      else {}
         self._sp_codes       = sp_codes  if isinstance(sp_codes, dict)  else {}
@@ -831,6 +1055,17 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._event_buffer = [e for e in events if isinstance(e, dict) and e.get("last_seen")]
             self._event_buffer.sort(key=lambda e: e.get("last_seen") or "", reverse=True)
             del self._event_buffer[LAST_DETECTION_EVENT_LIMIT:]
+
+        if isinstance(by_class, dict):
+            for cls in (BIRD, BAT):
+                rec = by_class.get(cls)
+                if isinstance(rec, dict) and rec.get("last_seen"):
+                    self._last_by_class[cls] = rec
+
+        # Telling bats from birds in the stored history needs the bundled bat
+        # list, so load it (off the event loop) before the bird-only view and
+        # the baseline are built from that history.
+        await async_load_bat_names(self.hass)
 
         # Rebuild the rarity baseline from the persisted daily counts so
         # rarity is available immediately on restart, before the first poll's
@@ -966,14 +1201,31 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         from firing for species already present in that history. Returns whether
         anything changed (so the caller can persist `_seen_species`).
         """
+        days = self._daily_counts if self._bat_support else self._bird_days
         changed = False
-        for day in sorted(self._daily_counts):
-            for sp in self._daily_counts[day]:
+        for day in sorted(days):
+            for sp in days[day]:
                 prev = self._seen_species.get(sp)
                 if prev is None or day < prev[:10]:
                     self._seen_species[sp] = day
                     changed = True
         return changed
+
+    def _is_bat(self, species: str) -> bool:
+        """Whether a common name is a bat (see bats.is_bat_name)."""
+        return is_bat_name(species, self._sp_codes)
+
+    @property
+    def _bird_days(self) -> dict[str, dict[str, int]]:
+        """The per-day history without bat rows — what every bird figure
+        reads. The stored history keeps the bats, so turning bat support on
+        later needs no re-download. Computed on each use (a few thousand rows,
+        a handful of times per poll), so it always reflects bat names learned
+        since."""
+        return {
+            day: {sp: c for sp, c in counts.items() if not self._is_bat(sp)}
+            for day, counts in self._daily_counts.items()
+        }
 
     def _rebuild_baseline(self, today: date) -> None:
         """Aggregate the trailing RARITY_WINDOW_DAYS of daily counts into the
@@ -984,7 +1236,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         cutoff = (today - timedelta(days=rarity_days)).isoformat()
         totals: dict[str, int] = {}
-        for date_str, counts in self._daily_counts.items():
+        for date_str, counts in self._bird_days.items():
             if date_str >= cutoff:  # ISO dates compare lexicographically
                 for sp, c in counts.items():
                     totals[sp] = totals.get(sp, 0) + int(c)
@@ -1019,6 +1271,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         audio_url (None for aged events whose clip is gone)."""
         view = [dict(e) for e in self._event_buffer]
         for e in view:
+            # Events buffered before bat support existed carry no classification.
+            e.setdefault("classification", classification(e.get("sp_code")))
             img = self._images.url_for(e.get("sp_code"))
             if img:
                 e["image_url"] = img
@@ -1040,7 +1294,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         today_str = today.isoformat()
         baseline_cutoff = (today - timedelta(days=ACTIVITY_BASELINE_DAYS)).isoformat()
         completed = {
-            d: sum(c.values()) for d, c in self._daily_counts.items() if d < today_str
+            d: sum(c.values()) for d, c in self._bird_days.items() if d < today_str
         }
         window_totals = [t for d, t in completed.items() if d >= baseline_cutoff and t > 0]
         typical_daily = (
@@ -1053,7 +1307,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             CONF_NEW_SPECIES_WINDOW_DAYS, NEW_SPECIES_WINDOW_DAYS
         )
         new_cutoff = (today - timedelta(days=new_days)).isoformat()
-        first_seen_dates = [fs[:10] for fs in self._seen_species.values() if fs]
+        first_seen_dates = [
+            fs[:10] for sp, fs in self._seen_species.items() if fs and not self._is_bat(sp)
+        ]
         new_species_window = sum(1 for fs in first_seen_dates if fs >= new_cutoff)
         days_since_new: int | None = None
         if first_seen_dates:
@@ -1079,7 +1335,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         store as a completed day)."""
         cutoff = (today - timedelta(days=6)).isoformat()  # 7 days incl. today
         counts7: dict[str, int] = {}
-        for date_str, counts in self._daily_counts.items():
+        for date_str, counts in self._bird_days.items():
             if date_str >= cutoff:
                 for sp, c in counts.items():
                     counts7[sp] = counts7.get(sp, 0) + int(c)
@@ -1179,8 +1435,10 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self._seen_species:
             return []
+        # A bird list: bats' first sightings fire new_species but aren't
+        # listed here.
         sorted_items = sorted(
-            self._seen_species.items(),
+            ((sp, fs) for sp, fs in self._seen_species.items() if not self._is_bat(sp)),
             key=lambda kv: kv[1] or "",
             reverse=True,
         )[:NEW_SPECIES_HISTORY_LIMIT]
@@ -1251,7 +1509,8 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def lifetime_species_count(self) -> int:
-        return len(self._seen_species)
+        """Bird species ever recorded (the first-seen log also holds bats)."""
+        return sum(1 for sp in self._seen_species if not self._is_bat(sp))
 
     async def _import_history_statistics(self) -> None:
         """Backfill long-term statistics from the per-day store (the heavy
@@ -1260,7 +1519,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hass,
             self.serial,
             self.device_name,
-            self._daily_counts,
+            self._bird_days,
             await self._async_box_tz(),
         )
 

@@ -1,0 +1,235 @@
+{
+ "source": "USGS Open-File Report 2018-1068, Table 3 (https://pubs.usgs.gov/publication/ofr20181068); public domain",
+ "species": [
+  {
+   "common": "Pallid bat",
+   "scientific": "Antrozous pallidus",
+   "code": "ANTPAL"
+  },
+  {
+   "common": "Jamaican fruit-eating bat",
+   "scientific": "Artibeus jamaicensis",
+   "code": "ARTJAM"
+  },
+  {
+   "common": "Mexican long-tongued bat",
+   "scientific": "Choeronycteris mexicana",
+   "code": "CHOMEX"
+  },
+  {
+   "common": "Rafinesque's big-eared bat",
+   "scientific": "Corynorhinus rafinesquii",
+   "code": "CORRAF"
+  },
+  {
+   "common": "Townsend's big-eared bat",
+   "scientific": "Corynorhinus townsendii",
+   "code": "CORTOW"
+  },
+  {
+   "common": "Big brown bat",
+   "scientific": "Eptesicus fuscus",
+   "code": "EPTFUS"
+  },
+  {
+   "common": "Spotted bat",
+   "scientific": "Euderma maculatum",
+   "code": "EUDMAC"
+  },
+  {
+   "common": "Florida bonneted bat",
+   "scientific": "Eumops floridanus",
+   "code": "EUMFLO"
+  },
+  {
+   "common": "Greater bonneted bat",
+   "scientific": "Eumops perotis",
+   "code": "EUMPER"
+  },
+  {
+   "common": "Underwood's bonneted bat",
+   "scientific": "Eumops underwoodii",
+   "code": "EUMUND"
+  },
+  {
+   "common": "Allen's big-eared bat",
+   "scientific": "Idionycteris phyllotis",
+   "code": "IDIPHY"
+  },
+  {
+   "common": "Silver-haired bat",
+   "scientific": "Lasionycteris noctivagans",
+   "code": "LASNOC"
+  },
+  {
+   "common": "Western red bat",
+   "scientific": "Lasiurus blossevillii",
+   "code": "LASBLO"
+  },
+  {
+   "common": "Eastern red bat",
+   "scientific": "Lasiurus borealis",
+   "code": "LASBOR"
+  },
+  {
+   "common": "Hoary bat",
+   "scientific": "Lasiurus cinereus",
+   "code": "LASCIN"
+  },
+  {
+   "common": "Southern yellow bat",
+   "scientific": "Lasiurus ega",
+   "code": "LASEGA"
+  },
+  {
+   "common": "Northern yellow bat",
+   "scientific": "Lasiurus intermedius",
+   "code": "LASINT"
+  },
+  {
+   "common": "Seminole bat",
+   "scientific": "Lasiurus seminolus",
+   "code": "LASSEM"
+  },
+  {
+   "common": "Western yellow bat",
+   "scientific": "Lasiurus xanthinus",
+   "code": "LASXAN"
+  },
+  {
+   "common": "Mexican long-nosed bat",
+   "scientific": "Leptonycteris nivalis",
+   "code": "LEPNIV"
+  },
+  {
+   "common": "Lesser long-nosed bat",
+   "scientific": "Leptonycteris yerbabuenae",
+   "code": "LEPYER"
+  },
+  {
+   "common": "California leaf-nosed bat",
+   "scientific": "Macrotus californicus",
+   "code": "MACCAL"
+  },
+  {
+   "common": "Pallas' mastiff bat",
+   "scientific": "Molossus molossus",
+   "code": "MOLMOL"
+  },
+  {
+   "common": "Peter's ghost-faced bat",
+   "scientific": "Mormoops megalophylla",
+   "code": "MORMEG"
+  },
+  {
+   "common": "Southwestern myotis",
+   "scientific": "Myotis auriculus",
+   "code": "MYOAUR"
+  },
+  {
+   "common": "Southeastern myotis",
+   "scientific": "Myotis austroriparius",
+   "code": "MYOAUS"
+  },
+  {
+   "common": "California myotis",
+   "scientific": "Myotis californicus",
+   "code": "MYOCAL"
+  },
+  {
+   "common": "Western small-footed myotis",
+   "scientific": "Myotis ciliolabrum",
+   "code": "MYOCIL"
+  },
+  {
+   "common": "Long-eared myotis",
+   "scientific": "Myotis evotis",
+   "code": "MYOEVO"
+  },
+  {
+   "common": "Gray myotis",
+   "scientific": "Myotis grisescens",
+   "code": "MYOGRI"
+  },
+  {
+   "common": "Keen's myotis",
+   "scientific": "Myotis keenii",
+   "code": "MYOKEE"
+  },
+  {
+   "common": "Eastern small-footed myotis",
+   "scientific": "Myotis leibii",
+   "code": "MYOLEI"
+  },
+  {
+   "common": "Little brown myotis",
+   "scientific": "Myotis lucifugus",
+   "code": "MYOLUC"
+  },
+  {
+   "common": "Arizona myotis",
+   "scientific": "Myotis occultus",
+   "code": "MYOOCC"
+  },
+  {
+   "common": "Northern myotis",
+   "scientific": "Myotis septentrionalis",
+   "code": "MYOSEP"
+  },
+  {
+   "common": "Indiana myotis",
+   "scientific": "Myotis sodalis",
+   "code": "MYOSOD"
+  },
+  {
+   "common": "Fringed myotis",
+   "scientific": "Myotis thysanodes",
+   "code": "MYOTHY"
+  },
+  {
+   "common": "Cave myotis",
+   "scientific": "Myotis velifer",
+   "code": "MYOVEL"
+  },
+  {
+   "common": "Long-legged myotis",
+   "scientific": "Myotis volans",
+   "code": "MYOVOL"
+  },
+  {
+   "common": "Yuma myotis",
+   "scientific": "Myotis yumanensis",
+   "code": "MYOYUM"
+  },
+  {
+   "common": "Evening bat",
+   "scientific": "Nycticeius humeralis",
+   "code": "NYCHUM"
+  },
+  {
+   "common": "Pocketed free-tailed bat",
+   "scientific": "Nyctinomops femorosaccus",
+   "code": "NYCFEM"
+  },
+  {
+   "common": "Big free-tailed bat",
+   "scientific": "Nyctinomops macrotis",
+   "code": "NYCMAC"
+  },
+  {
+   "common": "Canyon bat",
+   "scientific": "Parastrellus hesperus",
+   "code": "PARHES"
+  },
+  {
+   "common": "Tri-colored bat",
+   "scientific": "Perimyotis subflavus",
+   "code": "PERSUB"
+  },
+  {
+   "common": "Brazilian free-tailed bat",
+   "scientific": "Tadarida brasiliensis",
+   "code": "TADBRA"
+  }
+ ]
+}

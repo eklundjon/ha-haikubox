@@ -33,7 +33,7 @@ The card adjusts to whatever size you give it:
 
 You can resize the card from the **Layout** tab in the card editor, or with `grid_options` in YAML.
 
-The card works with any Haikubox sensor that has a `detections` list: `recent_detections`, `last_detection`, `daily_top_species`, `notable_species`, `new_species`, `yearly_top_species`, `rarest_species` and `watched_species`. It shows the top-ranked bird from that list. If the list is empty, the card says "No recent detections."
+The card works with any Haikubox sensor that has a `detections` list: `recent_detections`, `last_detection`, `daily_top_species`, `notable_species`, `new_species`, `yearly_top_species`, `rarest_species` and `watched_species`, plus the [bat sensors](bats.md) `last_bird_detection`, `last_bat_detection` and `bats_today`. It shows the top-ranked bird from that list. If the list is empty, the card says "No recent detections."
 
 The "5m ago" label updates every minute, so it stays accurate between polls.
 
@@ -197,6 +197,7 @@ Once it's on:
 - Clips for the last detection and notable species are kept for 30 days. To keep clips for every detection, set **Audio: extra days to cache the full feed** to more than 0.
 - Detection clips are often very quiet, so each one is turned up (normalized) when it's saved.
 - A clip with no real sound in it gets no play button.
+- Bats have no play button yet. Their recordings are ultrasonic and need processing to be audible.
 
 This uses `ffmpeg`, which comes with Home Assistant.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -11,7 +12,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.haikubox.const import CONF_DEVICE_NAME, CONF_SERIAL, DOMAIN
+from custom_components.haikubox.const import (
+    CONF_BAT_SUPPORT,
+    CONF_DEVICE_NAME,
+    CONF_SERIAL,
+    DOMAIN,
+)
 from custom_components.haikubox.coordinator import HaikuboxCoordinator
 from custom_components.haikubox.image_cache import ImageCache
 
@@ -48,15 +54,9 @@ def _fast_backfill(monkeypatch):
     )
 
 
-async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        unique_id=SERIAL,
-        data={CONF_SERIAL: SERIAL, CONF_DEVICE_NAME: "Bird Shazam"},
-        options={},
-    )
-    entry.add_to_hass(hass)
-    with (
+def _patched_poll():
+    """The network and image patches for setting up (or reloading) an entry."""
+    return (
         # The component-level async_setup only registers card JS + the cache
         # static path (needs the frontend wheel); not what we're exercising.
         patch("custom_components.haikubox.async_setup", return_value=True),
@@ -73,7 +73,20 @@ async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
             "async_fetch",
             AsyncMock(return_value="/haikubox/cache/x.jpeg"),
         ),
-    ):
+    )
+
+
+async def _setup_entry(hass: HomeAssistant, **data) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=SERIAL,
+        data={CONF_SERIAL: SERIAL, CONF_DEVICE_NAME: "Bird Shazam", **data},
+        options={},
+    )
+    entry.add_to_hass(hass)
+    with ExitStack() as stack:
+        for p in _patched_poll():
+            stack.enter_context(p)
         # ffmpeg isn't patched: _ffmpeg_binary now degrades gracefully when the
         # component/binary is absent, so setup must work regardless.
         await hass.config_entries.async_setup(entry.entry_id)
@@ -140,3 +153,37 @@ async def test_entry_setup_without_ffmpeg(hass: HomeAssistant) -> None:
         entry = await _setup_entry(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert isinstance(entry.runtime_data, HaikuboxCoordinator)
+
+
+_BAT_UNIQUE_IDS = {
+    f"{SERIAL}_{suffix}"
+    for suffix in ("last_bird_detection", "last_bat_detection", "bat_count_today", "bats_today")
+}
+
+
+async def test_bat_sensors_follow_bat_support(hass: HomeAssistant) -> None:
+    """Bat support adds four sensors; turning it off removes them again."""
+    entry = await _setup_entry(hass, **{CONF_BAT_SUPPORT: True})
+    registry = er.async_get(hass)
+
+    def _unique_ids() -> set[str]:
+        return {
+            e.unique_id for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+        }
+
+    assert _BAT_UNIQUE_IDS <= _unique_ids()
+    assert len(_unique_ids()) == 19
+
+    # What reconfigure does: update the entry's data and reload it.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_BAT_SUPPORT: False}
+    )
+    with ExitStack() as stack:
+        for p in _patched_poll():
+            stack.enter_context(p)
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert not _BAT_UNIQUE_IDS & _unique_ids()
+    assert len(_unique_ids()) == 15
