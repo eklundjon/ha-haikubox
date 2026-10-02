@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from datetime import UTC, date, datetime, timedelta, tzinfo
@@ -17,7 +18,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import HaikuboxApiClient
+from .api import HaikuboxApiClient, retry_after_seconds
 from .audio_cache import AudioCache
 from .bats import (
     BAT,
@@ -94,6 +95,19 @@ from .normalize import (
 from .statistics import async_import_history_statistics
 
 _LOGGER = logging.getLogger(__name__)
+
+# UpdateFailed(retry_after=...) delays the next refresh (Home Assistant 2025.12+).
+# Older versions don't accept the argument, so check once.
+_UPDATE_FAILED_TAKES_RETRY_AFTER = (
+    "retry_after" in inspect.signature(UpdateFailed.__init__).parameters
+)
+
+
+def _update_failed(message: str, retry_after: float | None) -> UpdateFailed:
+    """UpdateFailed carrying retry_after where this Home Assistant supports it."""
+    if retry_after is not None and _UPDATE_FAILED_TAKES_RETRY_AFTER:
+        return UpdateFailed(message, retry_after=retry_after)
+    return UpdateFailed(message)
 
 
 def async_get_entry_device(
@@ -372,7 +386,9 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             fetched_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
         except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Error communicating with Haikubox API: {err}") from err
+            raise _update_failed(
+                f"Error communicating with Haikubox API: {err}", self._retry_after(err)
+            ) from err
 
         # Split off the bats. Everything below that works on `daily_raw` is the
         # bird pipeline and sees birds only; bats go through _update_bats, and
@@ -1573,6 +1589,20 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # be stubbed per-instance in tests; the HTTP logic lives in api.py).
     async def _async_box_tz(self) -> tzinfo | None:
         return await self._api.async_box_tz()
+
+    def _retry_after(self, err: aiohttp.ClientError) -> float | None:
+        """The API's Retry-After for a failed request, when it's worth honoring.
+
+        Only a delay longer than the poll interval counts: Home Assistant uses
+        retry_after as the next interval, so a shorter one would poll sooner.
+        """
+        if not isinstance(err, aiohttp.ClientResponseError):
+            return None
+        seconds = retry_after_seconds(err)
+        interval = self.update_interval
+        if seconds is None or (interval and seconds <= interval.total_seconds()):
+            return None
+        return seconds
 
     async def _fetch_detections(self, hours: int) -> Any:
         return await self._api.fetch_detections(hours)
