@@ -53,6 +53,11 @@ class FakeImages:
         return f"/haikubox/cache/{sp_code}.jpeg"
 
 
+# The throwaway config entry's id. A test that registers the device for event
+# firing registers it under a MockConfigEntry with this id.
+ENTRY_ID = "test_entry"
+
+
 def make_coordinator(hass, *, config_entry=None, options=None, **attrs):
     """Build a coordinator via __new__ with deterministic fakes.
 
@@ -64,7 +69,7 @@ def make_coordinator(hass, *, config_entry=None, options=None, **attrs):
     c.hass = hass
     c.serial = "TESTSERIAL"
     c.device_name = "Test Box"
-    c.config_entry = config_entry or SimpleNamespace(options=options or {})
+    c.config_entry = config_entry or SimpleNamespace(options=options or {}, entry_id=ENTRY_ID)
     # API client with the box tz pre-resolved (no network in unit tests). Tests
     # that drive a poll still stub c._fetch_* / c._async_box_tz directly.
     c._api = HaikuboxApiClient(None, c.serial)
