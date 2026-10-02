@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from unittest.mock import patch
 
 import aiohttp
@@ -143,3 +144,30 @@ async def test_device_info_network_error_raises() -> None:
     ):
         with pytest.raises(CannotConnect):
             await api.async_get_device_info(None, SERIAL)
+
+
+def _response_error(retry_after: str | None) -> aiohttp.ClientResponseError:
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    return aiohttp.ClientResponseError(None, (), status=429, headers=headers)
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("120", 120.0),
+        ("0", 0.0),
+        (None, None),
+        ("", None),
+        ("soon", None),
+        ("86400", 3600.0),  # capped at an hour
+        ("Wed, 21 Oct 2015 07:28:00 GMT", 0.0),  # a date in the past
+    ],
+)
+def test_retry_after_seconds(header, expected) -> None:
+    assert api.retry_after_seconds(_response_error(header)) == expected
+
+
+def test_retry_after_seconds_http_date() -> None:
+    when = datetime.now(UTC) + timedelta(seconds=900)
+    seconds = api.retry_after_seconds(_response_error(format_datetime(when, usegmt=True)))
+    assert 890 <= seconds <= 900

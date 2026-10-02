@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import aiohttp
+import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from multidict import CIMultiDict, CIMultiDictProxy
+from yarl import URL
 
 from custom_components.haikubox.const import CONF_NOTABLE_RARITY_WEIGHT
+from custom_components.haikubox.coordinator import _UPDATE_FAILED_TAKES_RETRY_AFTER
 
 from .coordinator_helpers import make_coordinator
 
@@ -105,3 +111,56 @@ async def test_update_data_filters_soundscape(hass: HomeAssistant) -> None:
     for key in ("recent_detections", "daily_top_species", "notable_detections"):
         species = {r["species"] for r in (data.get(key) or [])}
         assert "soundscape" not in species
+
+
+async def _poll_with_detections_error(hass, err: Exception):
+    c = make_coordinator(hass, options={CONF_NOTABLE_RARITY_WEIGHT: 100})
+    c.update_interval = timedelta(minutes=10)
+    _seed_history(c)
+
+    async def failing_detections(hours):
+        raise err
+
+    async def fake_daily_count(date_str):
+        return dict(_TODAY_COUNTS) if date_str == _TODAY.isoformat() else {}
+
+    async def fake_box_tz():
+        return UTC
+
+    c._fetch_detections = failing_detections
+    c._fetch_daily_count = fake_daily_count
+    c._async_box_tz = fake_box_tz
+    with pytest.raises(UpdateFailed) as excinfo:
+        await c._async_update_data()
+    return excinfo.value
+
+
+def _rate_limited(retry_after: str) -> aiohttp.ClientResponseError:
+    url = URL("https://api.haikubox.com/haikubox/TESTSERIAL/detections")
+    return aiohttp.ClientResponseError(
+        aiohttp.RequestInfo(url, "GET", CIMultiDictProxy(CIMultiDict()), url),
+        (),
+        status=429,
+        message="Too Many Requests",
+        headers={"Retry-After": retry_after},
+    )
+
+
+async def test_rate_limit_delays_next_refresh(hass: HomeAssistant) -> None:
+    """A 429 asking for longer than the poll interval sets retry_after (2025.12+)."""
+    err = await _poll_with_detections_error(hass, _rate_limited("1800"))
+    if _UPDATE_FAILED_TAKES_RETRY_AFTER:
+        assert err.retry_after == 1800
+    else:
+        assert getattr(err, "retry_after", None) is None
+
+
+async def test_short_retry_after_is_ignored(hass: HomeAssistant) -> None:
+    """A Retry-After shorter than the poll interval would poll sooner, so it's dropped."""
+    err = await _poll_with_detections_error(hass, _rate_limited("30"))
+    assert getattr(err, "retry_after", None) is None
+
+
+async def test_transport_error_has_no_retry_after(hass: HomeAssistant) -> None:
+    err = await _poll_with_detections_error(hass, aiohttp.ClientConnectionError("down"))
+    assert getattr(err, "retry_after", None) is None

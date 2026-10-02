@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -10,6 +11,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.haikubox as integration
@@ -154,6 +156,18 @@ async def test_entry_setup_without_ffmpeg(hass: HomeAssistant) -> None:
         entry = await _setup_entry(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert isinstance(entry.runtime_data, HaikuboxCoordinator)
+
+
+async def test_daily_counts_store_serializes_off_loop(hass: HomeAssistant) -> None:
+    """The large per-day history store serializes off the event loop where Home
+    Assistant supports it (2025.12+); the other stores keep the default."""
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data
+    if "serialize_in_event_loop" in inspect.signature(Store.__init__).parameters:
+        assert coordinator._daily_store._serialize_in_event_loop is False
+        assert coordinator._store._serialize_in_event_loop is True
+    else:
+        assert not hasattr(coordinator._daily_store, "_serialize_in_event_loop")
 
 
 _BAT_UNIQUE_IDS = {
