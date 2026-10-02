@@ -9,7 +9,7 @@ This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com
 ## Features
 
 - **Recent detections.** Species heard in the last hour, updated every 10 minutes.
-- **Last detection.** The most recent bird the box heard. It keeps its value through restarts and quiet spells.
+- **Last detection.** The most recent bird (or, with bat support on, bat) the box heard. It keeps its value through restarts and quiet spells.
 - **Notable species.** The most interesting bird of the last 24 hours, scored on how rare it is at your box and how recently it was heard. You can adjust the balance between the two in the integration's options.
 - **New species.** Birds heard for the first time ever on your box.
 - **24-hour counts.** Total detections and top species over the last day.
@@ -51,7 +51,7 @@ The integration reads from the public Haikubox API, which only knows about boxes
 
 1. Go to **Settings → Devices & Services → Add Integration**.
 2. Search for **Haikubox**.
-3. Paste your serial number.
+3. Paste your serial number. If your Haikubox hears bats as well as birds, tick **Bat support** (see [docs/bats.md](docs/bats.md)). You can change this later with **Reconfigure**.
 
 The integration checks the serial with Haikubox and creates a device named after your box (mine is "Bird Shazam"). Its sensors are listed in [docs/sensors.md](docs/sensors.md).
 
@@ -90,7 +90,7 @@ entities:
 | The two cards, YAML examples, tap actions, a sample dashboard | [docs/cards.md](docs/cards.md) |
 | Device triggers, the `haikubox_event` event, notification blueprints | [docs/automations.md](docs/automations.md) |
 | Bat support: what it adds, and how bats are kept out of bird counts | [docs/bats.md](docs/bats.md) |
-| Advanced options (windows and polling), changing the serial number | [docs/advanced.md](docs/advanced.md) |
+| Advanced options (windows and polling), changing the serial number or bat support | [docs/advanced.md](docs/advanced.md) |
 | Setup problems, cards not loading, sensors that look empty, upgrade notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Which Haikubox API calls the integration makes and when | [docs/api.md](docs/api.md) |
 | How the code is organized | [docs/architecture.md](docs/architecture.md) |

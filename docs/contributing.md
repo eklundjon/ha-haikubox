@@ -28,7 +28,7 @@ uv pip install --python .venv-test/bin/python -r requirements_test.txt
 .venv-test/bin/python -m pytest -k rarity             # by keyword
 ```
 
-There are about 80 tests in `tests/`, mostly one file per module (`test_api.py`, `test_image_cache.py`, `test_device_trigger.py`, and so on). The coordinator's tests are split across several files by topic: `test_coordinator_pure.py`, `_rarity`, `_backfill`, `_events`, `_statistics` and `_update`.
+There are about 115 tests in `tests/`, mostly one file per module (`test_api.py`, `test_image_cache.py`, `test_device_trigger.py`, `test_bats.py`, and so on). The coordinator's tests are split across several files by topic: `test_coordinator_pure.py`, `_rarity`, `_backfill`, `_events`, `_statistics`, `_update` and `_bats`.
 
 ### Building a coordinator in tests
 

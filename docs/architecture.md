@@ -119,7 +119,8 @@ flowchart TD
     EnsureDaily[_ensure_daily_counts<br/>new completed day + backfill chunk<br/>via /daily-count?date] --> Rebuild[_rebuild_baseline<br/>aggregate trailing 365d<br/>→ rank lookup]
     Rebuild --> FetchDetections
 
-    FetchDetections[GET /detections?hours=24] --> FilterRecent[_filter_by_dt<br/>raw items where<br/>dt &gt; now - 1h]
+    FetchDetections[GET /detections?hours=24] --> Split[split_detections<br/>birds → the steps below<br/>bats → bat records and events]
+    Split --> FilterRecent[_filter_by_dt<br/>raw items where<br/>dt &gt; now - 1h]
     FilterRecent --> NormaliseRecent[_normalise_detections<br/>on recent subset<br/>+ _apply_rarity_scores]
     NormaliseRecent --> NormaliseDaily[_normalise_detections<br/>on full 24h →<br/>daily_count + rarity]
 
@@ -147,6 +148,7 @@ Each step waits for the one before it. There's no `asyncio.gather` and no backgr
 - The 24-hour list has to exist before the `_seen_species` seed. The seed runs before new-species tracking so a new install is seeded from the full 24 hours, not just the last hour (issue #14).
 - `rarest_species` uses the last 7 days of `daily_counts` plus today's 24-hour list, so birds heard 1–24 hours ago count toward today (issue #15).
 - `last_detection` reads a saved list of recent events. Each poll's events (`_build_recent_events`) are merged in, with duplicates removed and a cap of 50, so it survives restarts and outages (issue #62). `notable_species` isn't saved. It empties with its 24-hour window and becomes `unknown`.
+- Bats are split off right after the fetch (`bats.split_detections`), so every step in the diagram works on birds only. With bat support on, the bat items feed the mixed `last_detection` buffer, the per-class `last_by_class` records, bat `new_species`/`watched_species`, and `bat_activity`. The stored daily history keeps bat rows; the bird calculations read `_bird_days`, a view without them.
 - Notability is scored last. It reads `notable_rarity_weight` from `entry.options` and adds `notability_score` to each 24-hour record.
 
 ### One data dict
@@ -156,6 +158,7 @@ Each poll returns one `dict[str, Any]`. Most keys match sensor names. The except
 - **Single records are kept apart from their lists:** `last_detection` (the newest saved event) and `recent_events` (the list); `notable_detection` (the current top, or `None`) and `notable_detections`; `new_detection` and `new_detections`. `last_detection` and `new_detection` are saved. `notable_detection` isn't, and becomes `None` (so the sensor is `unknown`) when its 24-hour window is empty (issue #62).
 - **`recent_events`** is the per-detection list behind `last_detection`'s `detections` attribute: the last 50 detections, newest first, with duplicates removed.
 - **`lifetime_species_count`** is a single number, shown as an attribute on `new_species`.
+- **The bat keys** (`last_bird_detection`, `last_bat_detection`, `bat_today_total`, `bats_today`) are always present, so turning bat support on changes nothing but which sensors exist. With it off they're empty, apart from `last_bird_detection`, which no sensor reads then.
 
 This dict is the contract between the coordinator and the sensors:
 
