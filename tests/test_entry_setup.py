@@ -187,3 +187,43 @@ async def test_bat_sensors_follow_bat_support(hass: HomeAssistant) -> None:
     assert entry.state is ConfigEntryState.LOADED
     assert not _BAT_UNIQUE_IDS & _unique_ids()
     assert len(_unique_ids()) == 15
+
+
+def _stored_history(hass_storage, days: dict) -> None:
+    """Pre-seed the per-day history store, as an existing install has."""
+    hass_storage[f"{DOMAIN}.{SERIAL}.daily_counts"] = {
+        "version": 1,
+        "key": f"{DOMAIN}.{SERIAL}.daily_counts",
+        "data": {"days": days, "backfill_complete": True, "cursor": None, "misses": 14},
+    }
+
+
+_YESTERDAY = (_TODAY - timedelta(days=1)).isoformat()
+
+
+async def test_existing_install_hearing_bats_gets_bat_support(
+    hass: HomeAssistant, hass_storage
+) -> None:
+    """An entry from before bat support, whose history holds bats, has bat
+    support turned on at upgrade, with its sensors on the same start."""
+    _stored_history(hass_storage, {_YESTERDAY: {**_HISTORY_DAY, "Bat": 30}})
+    entry = await _setup_entry(hass)
+
+    assert entry.data[CONF_BAT_SUPPORT] is True
+    registry = er.async_get(hass)
+    uids = {e.unique_id for e in er.async_entries_for_config_entry(registry, entry.entry_id)}
+    assert _BAT_UNIQUE_IDS <= uids
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_existing_install_without_bats_stays_off(hass: HomeAssistant, hass_storage) -> None:
+    _stored_history(hass_storage, {_YESTERDAY: dict(_HISTORY_DAY)})
+    entry = await _setup_entry(hass)
+    assert entry.data[CONF_BAT_SUPPORT] is False
+
+
+async def test_bat_support_choice_is_never_overridden(hass: HomeAssistant, hass_storage) -> None:
+    """Someone who turned bat support off keeps it off, bats or not."""
+    _stored_history(hass_storage, {_YESTERDAY: {**_HISTORY_DAY, "Bat": 30}})
+    entry = await _setup_entry(hass, **{CONF_BAT_SUPPORT: False})
+    assert entry.data[CONF_BAT_SUPPORT] is False

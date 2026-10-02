@@ -6,6 +6,8 @@ Haikubox's bird-and-bat model hears bats as well as birds. This page covers what
 
 Bat support is a checkbox when you add the Haikubox. To change it later, open the integration and choose **Reconfigure**. It's off by default.
 
+If you set the Haikubox up before bat support existed, the integration checks once, on the first start after upgrading: if your box's history includes bats, bat support is turned on for you. Either way you can change it with **Reconfigure**, and it won't be changed for you again.
+
 - **On:** bats get their own sensors and events (below).
 - **Off:** bats are ignored completely. They don't appear in any sensor or event. Turning it off removes the bat sensors.
 
