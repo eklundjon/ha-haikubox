@@ -647,6 +647,12 @@ class HaikuboxBirdCard extends HTMLElement {
           height: 100%;
           overflow: hidden;
         }
+        /* A bat's behavior adds a line under the confidence, so the portrait
+           layouts reserve one more line of text below the photo. */
+        .layout.has-behavior {
+          --text-reserve: clamp(128px, 40cqh, 230px);
+          --squat-text-reserve: clamp(110px, 36cqh, 190px);
+        }
 
         /*
          * Portrait layout — priorities when vertical space is tight. The photo
@@ -668,7 +674,7 @@ class HaikuboxBirdCard extends HTMLElement {
            * the photo. Sized for the worst case so the species name never
            * collides with the photo / its credit overlay.
            */
-          height: min(100cqw, calc(100cqh - clamp(104px, 34cqh, 200px)));
+          height: min(100cqw, calc(100cqh - var(--text-reserve, clamp(104px, 34cqh, 200px))));
           width: 100%;
           align-self: center;
           overflow: hidden;
@@ -760,7 +766,7 @@ class HaikuboxBirdCard extends HTMLElement {
          */
         @container (min-aspect-ratio: 1.2) and (max-aspect-ratio: 3/2) {
           .img-wrap {
-            height: calc(100cqh - clamp(86px, 30cqh, 160px));
+            height: calc(100cqh - var(--squat-text-reserve, clamp(86px, 30cqh, 160px)));
             width: 100%;
           }
         }
@@ -912,7 +918,7 @@ class HaikuboxBirdCard extends HTMLElement {
         }
       </style>
       <ha-card class="${actionable ? "actionable" : ""}"${actionable ? ' role="button" tabindex="0"' : ""}>
-        <div class="layout">
+        <div class="layout${bird?.behavior ? " has-behavior" : ""}">
           ${empty ? `
             <div class="empty">No recent detections</div>
           ` : `
