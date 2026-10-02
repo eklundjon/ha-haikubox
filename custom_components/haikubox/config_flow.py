@@ -137,7 +137,9 @@ class HaikuboxConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_serial"
                 else:
                     device_name = device.get("haikuboxName") or f"Haikubox {serial}"
-                    return self.async_update_reload_and_abort(
+                    # The entry's update listener does the reload; reloading
+                    # here too is deprecated from 2026.6 and an error in 2026.12.
+                    return self.async_update_and_abort(
                         self._get_reconfigure_entry(),
                         title=device_name,
                         data_updates={
