@@ -51,6 +51,18 @@ function _isHaikuboxListEntity(hass, state) {
   return entry.platform === "haikubox";
 }
 
+// Card-picker suggestions ("By entity" in "Add to dashboard", Home Assistant
+// 2026.6+): whether an entity is one of this integration's sensors with a
+// `detections` list. Stricter than _isHaikuboxListEntity, which lets entities
+// through when the registry can't be read: a suggestion must never appear for
+// another integration's entity. Older Home Assistant ignores the hook.
+function _isOwnListEntity(hass, entityId) {
+  return (
+    Array.isArray(hass?.states?.[entityId]?.attributes?.detections) &&
+    hass?.entities?.[entityId]?.platform === "haikubox"
+  );
+}
+
 // ── Editor ────────────────────────────────────────────────────────────────────
 
 class HaikuboxBirdCardEditor extends HTMLElement {
@@ -1004,6 +1016,11 @@ if (!customElements.get("haikubox-bird-card")) {
       type: "haikubox-bird-card",
       name: "Haikubox Bird Card",
       description: "Displays a Haikubox bird or bat detection with photo, species name, and timestamp.",
+      documentationURL: "https://github.com/eklundjon/ha-haikubox/blob/main/docs/cards.md",
+      getEntitySuggestion: (hass, entityId) =>
+        _isOwnListEntity(hass, entityId)
+          ? { config: { type: "custom:haikubox-bird-card", entity: entityId } }
+          : null,
     });
   }
 }

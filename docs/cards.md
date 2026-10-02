@@ -270,6 +270,8 @@ sections:
 
 You don't have to write YAML. Click **Add card**, pick a Haikubox card, and set the options in the editor.
 
+On Home Assistant 2026.6 and later you can also start from a sensor: in **Add to dashboard → By entity**, pick a Haikubox sensor and the Haikubox cards that fit it are offered under **Community**. The bird card is offered for every sensor with a `detections` list, and the list card for all of those except `last_bird_detection` and `last_bat_detection`, which hold a single detection.
+
 The entity picker only lists Haikubox sensors that have a `detections` list. Sensors that are just a number, like `daily_count` or `activity_level`, aren't offered.
 
 The bird card's editor includes a tap action dropdown (More info, Show species list, Navigate, Open URL, None) with a path field for Navigate and Open URL. The tokens from [Tap action](#tap-action) work there too.
