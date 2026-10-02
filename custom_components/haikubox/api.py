@@ -8,7 +8,8 @@ used by the config flow.
 from __future__ import annotations
 
 import logging
-from datetime import tzinfo
+from datetime import UTC, tzinfo
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import aiohttp
@@ -21,8 +22,35 @@ from .const import API_BASE
 _LOGGER = logging.getLogger(__name__)
 
 
+# A Retry-After longer than this counts as this, so a bad header can't stall
+# updates for hours.
+_MAX_RETRY_AFTER = 3600
+
+
 class CannotConnect(Exception):
     """The Haikubox API could not be reached (network/transport failure)."""
+
+
+def retry_after_seconds(err: aiohttp.ClientResponseError) -> float | None:
+    """How long the API asked us to wait (its Retry-After header), in seconds.
+
+    The header is either a number of seconds or an HTTP date. Returns None when
+    it's missing or unparseable, and caps it at an hour.
+    """
+    value = (err.headers or {}).get("Retry-After")
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - dt_util.utcnow()).total_seconds()
+    return min(max(seconds, 0.0), _MAX_RETRY_AFTER)
 
 
 async def async_get_device_info(hass: HomeAssistant, serial: str) -> dict | None:
