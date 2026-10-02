@@ -190,6 +190,8 @@ Local variables in `_async_update_data`: `detections` (last hour, newest first),
 
 Each file is only written when its data changes, tracked with a dirty flag. The event list, for example, is only written when a poll adds a new detection.
 
+`daily_counts` is by far the largest file (more than a megabyte for a box with a few years of history), so on Home Assistant 2025.12 and later it's serialized on a worker thread instead of the event loop (`Store(serialize_in_event_loop=False)`). The event loop keeps running while that happens, so the save is handed a shallow copy of `_daily_counts`. That's enough because days are only ever replaced, never edited in place. The other files are small and use the default.
+
 ### 3. Photos and audio on disk
 
 Photos are saved as `/config/haikubox/<sp_code>.jpeg`, and audio clips under `audio/<serial>/` in the same folder. The integration serves that folder itself at `/haikubox/cache/`. The path is registered in `async_setup` after the folder is created, so it works on a new install without HA's `/local` (which only exists if `config/www` was there at startup). `ImageCache` reads the folder once at startup into an in-memory `_cached` set, so lookups after that don't touch the disk.
@@ -271,6 +273,17 @@ The other migrations in `__init__.py` move the photo cache out of `config/www/ha
 `hacs.json` sets the minimum to Home Assistant 2025.4. The reason is the recorder statistics API used by [`statistics.py`](../custom_components/haikubox/statistics.py): `StatisticMeanType` and the `mean_type` field on `StatisticMetaData` arrived in 2025.4.0. On older versions the import fails and every poll fails with it. The code also passes `unit_class=None`, which only became a real `StatisticMetaData` field in 2025.11. Older versions ignore it.
 
 That floor also covers two older requirements from 2024.12: `OptionsFlow.config_entry` became read-only (the options flow relies on the framework setting it), and the sections grid sizing API the cards use.
+
+Some newer APIs are used where they exist, with a fallback for older versions. Each fallback only runs on an older Home Assistant, so test those changes on the minimum too (see [contributing.md](contributing.md#setup)):
+
+| API | Since | Used for | Fallback |
+|---|---|---|---|
+| `UpdateFailed(retry_after=...)` | 2025.12 | Honoring `Retry-After` from `/detections` | A plain `UpdateFailed` |
+| `Store(serialize_in_event_loop=False)` | 2025.12 | Saving `daily_counts` off the event loop | The default (serialize on the loop) |
+| `DeviceEntry.config_entry_id` | 2026.8 | `device_trigger` checking for bat support; `config_entries` is deprecated from 2026.10 | `config_entries` |
+| `async_get_device_by_identifier` | 2026.8 | Finding the device for `haikubox_event`; `async_get_device` is deprecated from 2026.9 | `async_get_device` |
+
+Reconfigure finishes with `async_update_entry` and then `async_abort`, rather than `async_update_and_abort`, because `ConfigFlow` doesn't have that helper on 2025.4. The entry's update listener does the single reload.
 
 ## Custom cards
 
