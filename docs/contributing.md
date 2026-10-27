@@ -50,7 +50,7 @@ The real coordinator `__init__` sets up an aiohttp session, seven `Store` object
 
 ### Card JavaScript tests
 
-`tests/js/` tests the card loader and the card modules' guards against being loaded twice. They use Node's built-in test runner (Node 22 or newer) and have no dependencies, so there's nothing to install:
+`tests/js/` tests the card modules: defining their elements again when HA's scoped registry polyfill replaces the registry, the guards against being loaded twice, and card-picker suggestions. They use Node's built-in test runner (Node 22 or newer) and have no dependencies, so there's nothing to install:
 
 ```bash
 node --test "tests/js/*.test.mjs"

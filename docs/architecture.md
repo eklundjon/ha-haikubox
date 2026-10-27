@@ -14,7 +14,6 @@ graph TB
 
     subgraph Bootstrap
         InitMod["__init__.py<br/>setup_entry + migration shim<br/>card JS registration"]
-        Loader["card_loader.py<br/>/local loader + Lovelace resource"]
     end
 
     subgraph Runtime
@@ -42,8 +41,6 @@ graph TB
 
     ConfigFlow -- "validates serial (api.py)" --> API
     InitMod -- "registers" --> Cards
-    InitMod -- "installs" --> Loader
-    Loader -- "loads at startup" --> Cards
     InitMod -- "constructs" --> Coord
     Coord -- "fetches via" --> Api
     Coord -- "transforms with" --> Normalize
@@ -70,7 +67,6 @@ custom_components/haikubox/
 ├── audio_cache.py        # AudioCache: download, normalize and prune detection clips
 ├── bats.py               # telling bats from birds: codes, names, splitting feeds and counts
 ├── binary_sensor.py      # extended-silence binary sensor
-├── card_loader.py        # copies the card loader to config/www and registers it as a resource
 ├── config_flow.py        # config flow (setup and reconfigure) and options flow
 ├── const.py              # domain, config keys, tuning constants, event and trigger names
 ├── coordinator.py        # HaikuboxCoordinator: runs each poll
@@ -78,6 +74,7 @@ custom_components/haikubox/
 ├── diagnostics.py        # redacted state dump
 ├── entity.py             # HaikuboxEntity: shared device info for the platforms
 ├── image_cache.py        # ImageCache: download each species photo once, serve it locally
+├── legacy_card_loader.py # removes the /local card loader that 0.9.0 through 1.0.0-rc1 installed
 ├── manifest.json         # the version here is the release version
 ├── normalize.py          # response parsing, rarity and notability scoring, link URLs
 ├── sensor.py             # 14 sensor classes, plus 4 with bat support on
@@ -89,8 +86,7 @@ custom_components/haikubox/
 ├── brand/                # logo and icon (also in home-assistant/brands)
 └── www/
     ├── haikubox-bird-card.js     # single-bird card
-    ├── haikubox-details-card.js  # list card
-    └── haikubox-card-loader.js   # startup loader, copied to config/www
+    └── haikubox-details-card.js  # list card
 ```
 
 ## The coordinator runs the poll, other modules do the work
@@ -106,7 +102,7 @@ Everything else is thin:
 
 - **Sensors** only read from `self.coordinator.data`. None of them call the API, keep state, or do any work. `PARALLEL_UPDATES = 0` because they all read the same dict. `entity.py` has their shared device info.
 - **The config flow** checks the serial with `api.async_get_device_info` and saves it. It never talks to the coordinator. Home Assistant calls `async_setup_entry`, which builds the coordinator from `entry.data`.
-- **`__init__.py`** is mostly registration: the cache static path, the card JS and loader, migrations, and forwarding to the sensor and binary sensor platforms.
+- **`__init__.py`** is mostly registration: the cache static path, the card JS, migrations, and forwarding to the sensor and binary sensor platforms.
 
 ### Inside `_async_update_data`
 
@@ -212,7 +208,7 @@ sequenceDiagram
     HA->>Init: async_setup(hass, config)
     Init->>HA: register /haikubox/*.js static paths
     Init->>HA: add_extra_js_url with ?v=<version>
-    Init->>HA: install /local card loader + Lovelace resource
+    Init->>HA: remove the old /local card loader, if any
 
     Note over User: User adds the integration
     User->>HA: Settings → Add → Haikubox
@@ -296,16 +292,13 @@ The cards only read sensor state through the frontend's WebSocket connection. Th
 
 ### How the cards get onto the page
 
-`add_extra_js_url` adds the card URLs, with `?v=<version>` to bust the browser cache, to the page HTML. HA writes that list into `index.html` when it serves the page, and the frontend never loads anything added later. HA starts serving pages before stage-2 integrations like this one have run `async_setup`, so a page loaded during startup has no cards. A browser or app reconnecting after a restart reloads during exactly that window.
+`add_extra_js_url` adds the card URLs, with `?v=<version>` to bust the browser cache, to the page HTML. HA writes that list into `index.html` when it serves the page, and the frontend never loads anything added later. HA starts serving pages before stage-2 integrations like this one have run `async_setup`, so a page loaded during startup has no cards until it's refreshed. A browser or app reconnecting after a restart reloads during exactly that window.
 
-[`card_loader.py`](../custom_components/haikubox/card_loader.py) handles that case:
+The integration can't close that gap on its own, since anything it registers (static paths, extra JS) only exists once `async_setup` has run. 0.9.0 through 1.0.0-rc1 got around it by copying a loader into `config/www`, which `/local` serves from the first request, and registering it as a Lovelace resource. HACS review turned that down: the user's `www` isn't ours to write to, the copy outlives an uninstall, and `/local` is served without authentication. [`legacy_card_loader.py`](../custom_components/haikubox/legacy_card_loader.py) now deletes the file and the resource on every setup.
 
-- It copies `www/haikubox-card-loader.js` to `config/www/`. `/local` is set up by the frontend integration before the web server starts, so the loader can always be fetched.
-- It registers the loader as a Lovelace resource at `/local/haikubox-card-loader.js?v=<version>`. Resources are saved in `.storage`, so the page lists the loader even during startup. There's exactly one entry: upgrades update it in place, and duplicates are removed.
-- The loader imports the real card modules from `/haikubox/…`, retrying with backoff until the static path exists. Lovelace rebuilds its error cards once the elements are defined.
-- Its first try uses the same URL as `add_extra_js_url`, so the browser runs each module once whichever gets there first.
+A second failure looks the same in the browser. HA's app bundle installs a scoped custom element registry polyfill, which replaces `window.customElements` with a registry of its own, and Lovelace looks cards up there. `index.html` starts the app bundle and the `add_extra_js_url` modules in parallel, so a card module can run first and define its elements on the native registry, which the polyfill's `get()` and `whenDefined()` never see. The card then shows "Custom element doesn't exist" on any page load where the card wins the race (on older WebKit, Safari and iPadOS before 26, that was every reload).
 
-This only works for storage-mode dashboards. YAML dashboards have to add the resource themselves. Removing the last entry removes the resource and the file.
+`_defineElement` in each card module handles it. HA installs the polyfill before it defines `<home-assistant>`, so the card waits on `whenDefined("home-assistant")` from the registry it defined on, and if `window.customElements` has changed by then, defines the same class again on the new one. The polyfill accepts a class that's already on the native registry (it reuses that definition instead of adding a stand-in), so the element Lovelace creates is the real card either way. Lovelace's pending `whenDefined` resolves and it rebuilds the error card.
 
 ### Card robustness
 
@@ -313,7 +306,7 @@ This only works for storage-mode dashboards. YAML dashboards have to add the res
 - **Broken images.** A photo that fails to load is replaced with the 🐦 placeholder, so the browser's broken-image icon never shows.
 - **Relative time.** A 60-second timer, started in `connectedCallback`, rewrites just the "5m ago" text. There's no full re-render, so images don't flicker and open rows don't collapse.
 - **`setConfig` / `set hass` order.** HA normally calls `setConfig` before `set hass`, but during a dashboard reload `set hass` can come first. `_render` and `_handleTapAction` return early when there's no config yet, instead of throwing and leaving the card stuck on HA's error card.
-- **Loading twice.** If a card's JS runs twice on the same page (the loader and `add_extra_js_url` under different URLs, or a cache hiccup during an upgrade), `customElements.define` and `customCards.push` are skipped when the element already exists.
+- **Loading twice.** If a card's JS runs twice on the same page (a cache hiccup during an upgrade, or a YAML dashboard that still lists the old loader), the second run skips `customElements.define` for elements that already exist and doesn't add a second card-picker entry.
 
 ## Automation events
 
