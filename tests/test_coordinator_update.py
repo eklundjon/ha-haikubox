@@ -7,6 +7,7 @@ pure-rarity notability (weight 100) so the result doesn't depend on "now".
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime, timedelta
 
 import aiohttp
@@ -14,10 +15,18 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from multidict import CIMultiDict, CIMultiDictProxy
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from yarl import URL
 
-from custom_components.haikubox.const import CONF_NOTABLE_RARITY_WEIGHT
-from custom_components.haikubox.coordinator import _UPDATE_FAILED_TAKES_RETRY_AFTER
+from custom_components.haikubox.const import (
+    CONF_NOTABLE_RARITY_WEIGHT,
+    CONF_SERIAL,
+    DOMAIN,
+)
+from custom_components.haikubox.coordinator import (
+    _UPDATE_FAILED_TAKES_RETRY_AFTER,
+    HaikuboxCoordinator,
+)
 
 from .coordinator_helpers import make_coordinator
 
@@ -164,3 +173,22 @@ async def test_short_retry_after_is_ignored(hass: HomeAssistant) -> None:
 async def test_transport_error_has_no_retry_after(hass: HomeAssistant) -> None:
     err = await _poll_with_detections_error(hass, aiohttp.ClientConnectionError("down"))
     assert getattr(err, "retry_after", None) is None
+
+
+async def test_base_class_attributes_dont_shadow_methods(hass: HomeAssistant) -> None:
+    """No method of ours shares a name with an attribute set in __init__.
+
+    DataUpdateCoordinator.__init__ sets instance attributes, and one with the
+    same name as a method hides it: _retry_after (Home Assistant 2025.12+) did
+    exactly that (#126). The tests above build the coordinator with __new__, so
+    only a real __init__ shows it.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_SERIAL: "TESTSERIAL"})
+    entry.add_to_hass(hass)
+    coordinator = HaikuboxCoordinator(hass, entry)
+    methods = {
+        name
+        for name, value in vars(HaikuboxCoordinator).items()
+        if inspect.isfunction(value)
+    }
+    assert methods & vars(coordinator).keys() == set()

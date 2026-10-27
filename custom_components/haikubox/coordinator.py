@@ -400,7 +400,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             fetched_raw = await self._fetch_detections(DAILY_WINDOW_HOURS)
         except aiohttp.ClientError as err:
             raise _update_failed(
-                f"Error communicating with Haikubox API: {err}", self._retry_after(err)
+                f"Error communicating with Haikubox API: {err}", self._compute_retry_after(err)
             ) from err
 
         # Split off the bats. Everything below that works on `daily_raw` is the
@@ -1606,7 +1606,7 @@ class HaikuboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_box_tz(self) -> tzinfo | None:
         return await self._api.async_box_tz()
 
-    def _retry_after(self, err: aiohttp.ClientError) -> float | None:
+    def _compute_retry_after(self, err: aiohttp.ClientError) -> float | None:
         """The API's Retry-After for a failed request, when it's worth honoring.
 
         Only a delay longer than the poll interval counts: Home Assistant uses
