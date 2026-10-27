@@ -51,22 +51,11 @@ The cards install themselves, so you don't need to add them under dashboard reso
 
 ## Cards show "Custom element doesn't exist" after a restart
 
-Home Assistant starts serving the dashboard before integrations like this one have finished loading. A browser or the Home Assistant app that reconnects during a restart can load the dashboard in that gap, before the cards exist.
+Home Assistant starts serving the dashboard before integrations like this one have finished loading. A browser or the Home Assistant app that reconnects during a restart can load the dashboard in that gap, before the cards exist. Refresh the page once Home Assistant has finished starting, and the cards appear.
 
-To handle this, the integration puts a small loader at `config/www/haikubox-card-loader.js` and adds it to your dashboard resources (**Settings → Dashboards → ⋮ → Resources**). The loader waits for the integration to finish loading and then brings the cards in, so they appear without a refresh. Please don't delete that resource. It's removed automatically when you remove your last Haikubox.
+Versions 0.9.0 through 1.0.0-rc1 worked around this with a loader they copied to `config/www/haikubox-card-loader.js` and added to your dashboard resources. An integration shouldn't write into `config/www` (the copy outlives an uninstall, and everything there is served without authentication), so newer versions delete that file and its resource on startup. If your dashboards are in YAML mode and you listed `/local/haikubox-card-loader.js` under `resources`, remove that entry.
 
-If you still see the error:
-
-1. **YAML dashboards** (`lovelace: mode: yaml`) have to list the loader themselves:
-   ```yaml
-   lovelace:
-     mode: yaml
-     resources:
-       - url: /local/haikubox-card-loader.js
-         type: module
-   ```
-   Right after an upgrade, a YAML dashboard may show the old version of the cards once. A force-refresh fixes it.
-2. **First restart after installing.** Home Assistant only serves files from `config/www` if that folder existed when it started. If the integration had to create it, the loader starts working after your next restart.
+If the error is still there after a refresh, see [Cards don't show up in the card picker](#cards-dont-show-up-in-the-card-picker).
 
 ## Cards show 🐦 instead of photos after an upgrade
 

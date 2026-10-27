@@ -316,11 +316,28 @@ class HaikuboxBirdListCardEditor extends HTMLElement {
 // Idempotent define: if the script gets loaded twice in the same page
 // (cache flap during an HA upgrade, version-bust transient, etc.) a
 // second `define` would throw and abort the script mid-execution,
-// stranding window.customCards in an inconsistent state. The same
-// guard appears around the card itself and customCards.push below.
-if (!customElements.get("haikubox-bird-list-card-editor")) {
-  customElements.define("haikubox-bird-list-card-editor", HaikuboxBirdListCardEditor);
+// stranding window.customCards in an inconsistent state.
+//
+// It also covers HA's scoped custom element registry polyfill, which replaces
+// window.customElements with a registry of its own, the one Lovelace looks
+// in. HA starts its app bundle and this module in parallel, so this module can
+// run first and define its elements on the native registry, which the
+// polyfill's get() and whenDefined() never see. The card then shows "Custom
+// element doesn't exist". HA installs the polyfill before it defines
+// <home-assistant>, so once that's defined, define the same class again on
+// whatever registry is current. The polyfill accepts a class that's already
+// on the native registry.
+function _defineElement(tag, cls) {
+  const registry = customElements;
+  if (!registry.get(tag)) registry.define(tag, cls);
+  registry.whenDefined("home-assistant").then(() => {
+    if (customElements !== registry && !customElements.get(tag)) {
+      customElements.define(tag, cls);
+    }
+  });
 }
+
+_defineElement("haikubox-bird-list-card-editor", HaikuboxBirdListCardEditor);
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 
@@ -1084,24 +1101,21 @@ class HaikuboxBirdListCard extends HTMLElement {
   }
 }
 
-if (!customElements.get("haikubox-bird-list-card")) {
-  customElements.define("haikubox-bird-list-card", HaikuboxBirdListCard);
+_defineElement("haikubox-bird-list-card", HaikuboxBirdListCard);
 
-  // The define guard alone doesn't cover this: when HA's scoped-registry
-  // polyfill hides a native define, the loader runs this module a second time
-  // (see haikubox-card-loader.js), and the card picker would list it twice.
-  window.customCards ??= [];
-  if (!window.customCards.some((c) => c.type === "haikubox-bird-list-card")) {
-    window.customCards.push({
-      type: "haikubox-bird-list-card",
-      name: "Haikubox Bird List Card",
-      description: "Ranked list of birds or bats — works with the top, rarest, recent and bats-today sensors.",
-      documentationURL: "https://github.com/eklundjon/ha-haikubox/blob/main/docs/cards.md",
-      getEntitySuggestion: (hass, entityId) =>
-        _isOwnListEntity(hass, entityId) &&
-        !_SINGLE_RECORD_SENSORS.has(hass.entities[entityId].translation_key)
-          ? { config: { type: "custom:haikubox-bird-list-card", entity: entityId } }
-          : null,
-    });
-  }
+// A second copy of this module (see _defineElement) must not list the card
+// twice in the card picker.
+window.customCards ??= [];
+if (!window.customCards.some((c) => c.type === "haikubox-bird-list-card")) {
+  window.customCards.push({
+    type: "haikubox-bird-list-card",
+    name: "Haikubox Bird List Card",
+    description: "Ranked list of birds or bats — works with the top, rarest, recent and bats-today sensors.",
+    documentationURL: "https://github.com/eklundjon/ha-haikubox/blob/main/docs/cards.md",
+    getEntitySuggestion: (hass, entityId) =>
+      _isOwnListEntity(hass, entityId) &&
+      !_SINGLE_RECORD_SENSORS.has(hass.entities[entityId].translation_key)
+        ? { config: { type: "custom:haikubox-bird-list-card", entity: entityId } }
+        : null,
+  });
 }
