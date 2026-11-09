@@ -51,9 +51,17 @@ The cards install themselves, so you don't need to add them under dashboard reso
 
 ## Cards show "Custom element doesn't exist" after a restart
 
-Home Assistant starts serving the dashboard before integrations like this one have finished loading. A browser or the Home Assistant app that reconnects during a restart can load the dashboard in that gap, before the cards exist. Refresh the page once Home Assistant has finished starting, and the cards appear.
+Home Assistant starts serving the dashboard before integrations like this one have finished loading, and an open dashboard reloads itself when Home Assistant restarts after an update. A dashboard that reloads in that gap gets a page without the cards.
 
-Versions 0.9.0 through 1.0.0-rc1 worked around this with a loader they copied to `config/www/haikubox-card-loader.js` and added to your dashboard resources. An integration shouldn't write into `config/www` (the copy outlives an uninstall, and everything there is served without authentication), so newer versions delete that file and its resource on startup. If your dashboards are in YAML mode and you listed `/local/haikubox-card-loader.js` under `resources`, remove that entry.
+The integration adds both cards to your dashboard resources (**Settings → Dashboards → ⋮ → Resources**, as `/haikubox/haikubox-bird-card.js` and `/haikubox/haikubox-bird-list-card.js`), so a browser that has shown the cards before loads them from its cache and they appear on their own once the page has loaded. That's what keeps a kiosk or wall tablet working across a Home Assistant update. You don't need to edit those entries. Setup updates them on every upgrade and adds them back on the next restart if they're deleted, and removing the integration takes them out.
+
+A refresh is still needed after a restart in these cases:
+
+- **A browser that has never shown the cards**, or whose cache was cleared.
+- **The first restart after upgrading this integration.** The page loads the previous version's cards from the cache, and a refresh gets the new ones.
+- **YAML-mode dashboards.** An integration can't change their resources, so the cards only arrive with `index.html`. For a kiosk on a YAML dashboard, have the kiosk app reload the page periodically.
+
+Versions 0.9.0 through 1.0.0-rc1 used a loader they copied to `config/www/haikubox-card-loader.js` and added to your dashboard resources. An integration shouldn't write into `config/www` (the copy outlives an uninstall, and everything there is served without authentication), so newer versions delete that file and its resource on startup. If your dashboards are in YAML mode and you listed `/local/haikubox-card-loader.js` under `resources`, remove that entry.
 
 If the error is still there after a refresh, see [Cards don't show up in the card picker](#cards-dont-show-up-in-the-card-picker).
 

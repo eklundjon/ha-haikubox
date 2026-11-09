@@ -67,6 +67,7 @@ custom_components/haikubox/
 ├── audio_cache.py        # AudioCache: download, normalize and prune detection clips
 ├── bats.py               # telling bats from birds: codes, names, splitting feeds and counts
 ├── binary_sensor.py      # extended-silence binary sensor
+├── card_resources.py     # keeps a Lovelace resource per card, for pages loaded during startup
 ├── config_flow.py        # config flow (setup and reconfigure) and options flow
 ├── const.py              # domain, config keys, tuning constants, event and trigger names
 ├── coordinator.py        # HaikuboxCoordinator: runs each poll
@@ -292,9 +293,21 @@ The cards only read sensor state through the frontend's WebSocket connection. Th
 
 ### How the cards get onto the page
 
-`add_extra_js_url` adds the card URLs, with `?v=<version>` to bust the browser cache, to the page HTML. HA writes that list into `index.html` when it serves the page, and the frontend never loads anything added later. HA starts serving pages before stage-2 integrations like this one have run `async_setup`, so a page loaded during startup has no cards until it's refreshed. A browser or app reconnecting after a restart reloads during exactly that window.
+`add_extra_js_url` adds the card URLs, with `?v=<version>` to bust the browser cache, to the page HTML. HA writes that list into `index.html` when it serves the page, and the frontend never loads anything added later. (Core has had a `frontend/subscribe_extra_js` push since 2024.7, but as of frontend 20260826 nothing subscribes to it.) HA serves pages from bootstrap stage 0, and stage-2 integrations like this one run `async_setup` well after that, so a page loaded during startup gets no cards from `add_extra_js_url`. That window is exactly when pages reload: the frontend reloads itself when it reconnects to a new backend version, so after an HA update every open dashboard does. A kiosk then shows "Custom element doesn't exist" until someone refreshes it.
 
-The integration can't close that gap on its own, since anything it registers (static paths, extra JS) only exists once `async_setup` has run. 0.9.0 through 1.0.0-rc1 got around it by copying a loader into `config/www`, which `/local` serves from the first request, and registering it as a Lovelace resource. HACS review turned that down: the user's `www` isn't ours to write to, the copy outlives an uninstall, and `/local` is served without authentication. [`legacy_card_loader.py`](../custom_components/haikubox/legacy_card_loader.py) now deletes the file and the resource on every setup.
+Anything the integration registers (static paths, extra JS) only exists once `async_setup` has run, so the fix has to come from something HA already has at stage 0:
+
+- **Lovelace resources.** [`card_resources.py`](../custom_components/haikubox/card_resources.py) keeps one storage-mode `module` resource per card, at the same `?v=` URL as the extra-JS entry. The resource list is HA's own storage, so a page loaded during startup still asks for the cards.
+- **The browser cache.** Our static path isn't registered yet when that page asks, but the card files are served with HA's static `max-age` of 31 days, so a browser that has shown the cards before loads them from its cache without asking the server. Lovelace's error card waits on `whenDefined` and rebuilds once the element exists, so the card appears with no refresh.
+
+Some details:
+
+- **Same URL, one module.** The resource and the extra-JS entry share a URL, so a page that has both runs each module once. Setup updates the resources before calling `add_extra_js_url`, so no page can get a new extra-JS URL alongside an old resource URL. If one ever does, `_defineElement` skips a tag that's already defined.
+- **Upgrades.** The first restart after an integration upgrade still has the old `?v=` in storage when the page loads, so that page runs the previous release's cards from cache until it's refreshed. That's the same as a dashboard left open across an upgrade (see "Cards show 🐦 instead of photos after an upgrade" in [troubleshooting.md](troubleshooting.md)), and better than no cards at all.
+- **What it doesn't cover.** A browser that has never loaded the cards (or has cleared its cache), and YAML-mode dashboards, whose resources are read-only to an integration. Both still need a refresh after a restart.
+- **Writes.** Setup changes the resources only on a new install, on an upgrade, or to clean up a duplicate or a hand-added entry of the wrong type. Removing the last Haikubox deletes them.
+
+0.9.0 through 1.0.0-rc1 closed the gap differently: they copied a loader into `config/www`, which `/local` serves from the first request, and registered it as a resource. HACS review turned that down, because the user's `www` isn't ours to write to, the copy outlives an uninstall, and `/local` is served without authentication. [`legacy_card_loader.py`](../custom_components/haikubox/legacy_card_loader.py) deletes the file and that resource on every setup. 1.0.0rc2 shipped with no workaround at all, which is how the kiosk case turned up.
 
 A second failure looks the same in the browser. HA's app bundle installs a scoped custom element registry polyfill, which replaces `window.customElements` with a registry of its own, and Lovelace looks cards up there. `index.html` starts the app bundle and the `add_extra_js_url` modules in parallel, so a card module can run first and define its elements on the native registry, which the polyfill's `get()` and `whenDefined()` never see. The card then shows "Custom element doesn't exist" on any page load where the card wins the race (on older WebKit, Safari and iPadOS before 26, that was every reload).
 

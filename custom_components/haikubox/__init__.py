@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 
 from .audio_cache import AudioCache
+from .card_resources import async_register_card_resources, async_remove_card_resources
 from .const import (
     CACHE_DIR_NAME,
     CACHE_URL_BASE,
@@ -48,12 +49,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     ] + [StaticPathConfig(CACHE_URL_BASE, cache_dir, True)])
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version or "dev"
-    # add_extra_js_url only reaches pages rendered after this point, so a page
-    # loaded while HA was still starting needs a refresh to show the cards.
-    for url, _ in _CARDS:
-        # The ?v= query busts the browser cache on upgrade; without it,
-        # default cache headers would serve a stale card after an update.
-        add_extra_js_url(hass, f"{url}?v={version}")
+    # The ?v= query busts the browser cache on upgrade; without it, default
+    # cache headers would serve a stale card after an update.
+    card_urls = [f"{url}?v={version}" for url, _ in _CARDS]
+    # add_extra_js_url only reaches pages rendered after this point. The
+    # Lovelace resources also cover a page loaded while HA was still starting
+    # (see card_resources.py). Update them first, so no page gets the new
+    # extra-JS URL alongside an old resource URL.
+    await async_register_card_resources(hass, card_urls)
+    for url in card_urls:
+        add_extra_js_url(hass, url)
     await async_remove_legacy_card_loader(hass)
     return True
 
@@ -194,7 +199,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) ->
     (`config/haikubox/*.jpeg`) holds global Haikubox assets shared by every box,
     so the whole cache dir is removed only once no Haikubox entries remain — by
     the time this runs HA has already dropped the entry being removed, so an
-    empty list means it was the last.
+    empty list means it was the last. The cards' dashboard resources go then
+    too.
     """
     serial = entry.data[CONF_SERIAL]
     await HaikuboxCoordinator.async_remove_stores(hass, serial)
@@ -210,3 +216,6 @@ async def async_remove_entry(hass: HomeAssistant, entry: HaikuboxConfigEntry) ->
     if not hass.config_entries.async_entries(DOMAIN):
         cache_dir = Path(hass.config.path(CACHE_DIR_NAME))
         await hass.async_add_executor_job(shutil.rmtree, cache_dir, True)
+        # Without a Haikubox the static paths go away on the next restart, so
+        # the cards' resources would only 404.
+        await async_remove_card_resources(hass, [url for url, _ in _CARDS])
