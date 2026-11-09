@@ -1,6 +1,6 @@
 # Haikubox for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://www.home-assistant.io/integrations/marketplace/)
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2025.4+-blue.svg?logo=homeassistant)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -32,13 +32,17 @@ This is a Home Assistant integration for the [Haikubox](https://www.haikubox.com
 
 ### Install
 
-**HACS (recommended)**
+It's in the default catalog of the Marketplace (and of HACS before it), so you can find it by name. The badge opens it directly:
 
-Haikubox is in the [HACS](https://hacs.xyz/) default store.
+[![Open this repository in your Home Assistant instance.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eklundjon&repository=ha-haikubox&category=integration)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eklundjon&repository=ha-haikubox&category=integration)
+**Marketplace (Home Assistant 2026.11 and later)**
 
-Click the badge, click **Download**, and restart Home Assistant. You can also search for **Haikubox** from inside HACS.
+Go to Settings → **Marketplace**, search for **Haikubox**, open it and install it. If Home Assistant needs a restart before the integration can load, a repair notice says so.
+
+**HACS (Home Assistant before 2026.11)**
+
+Search HACS for **Haikubox**, open it, click **Download**, and restart Home Assistant. When you update Home Assistant to 2026.11 or later, it moves to the Marketplace along with everything else HACS installed, and keeps getting updates.
 
 **Manual**
 
